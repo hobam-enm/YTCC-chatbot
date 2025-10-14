@@ -491,7 +491,7 @@ for m in st.session_state.messages:
         st.markdown(m["content"])
 
 # ============== 9) 입력 핸들러 ==============
-prompt = st.chat_input("", placeholder="한 줄로 요청하세요 (예: 최근 24시간 폭군의셰프 반응 분석)")
+prompt = st.chat_input(placeholder="한 줄로 요청하세요 (예: 최근 24시간 폭군의셰프 반응 분석)")
 if prompt:
     # 사용자 메시지 추가
     st.session_state.messages.append({"role":"user","content":prompt})
