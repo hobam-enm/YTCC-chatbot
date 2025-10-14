@@ -314,7 +314,7 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
     return out_csv, total_written
 
 # ===================== 6) LLM 직렬화 =====================
-def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars_per_comment=280, max_total_chars=420_000):
+def serialize_comments_for_llm_from_file(csv_path: str, max_rows=5000, max_chars_per_comment=280, max_total_chars=420_000):
     if not csv_path or not os.path.exists(csv_path): return "", 0, 0
     lines, total = [], 0; remaining = max_rows
     for chunk in pd.read_csv(csv_path, chunksize=120_000):
