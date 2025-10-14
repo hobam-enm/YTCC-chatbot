@@ -18,7 +18,29 @@ from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
 st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="collapsed")
-st.markdown("<h2 style='margin-top:0'>💬 유튜브 댓글분석기 — 챗봇</h2>", unsafe_allow_html=True)
+
+# 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
+st.markdown("""
+<style>
+/* Streamlit 메인 컨테이너 패딩 최소화 */
+.main .block-container {
+    padding-top: 2rem; /* 위쪽 패딩만 조금 남기고 */
+    padding-right: 1rem;
+    padding-left: 1rem;
+    padding-bottom: 0rem; /* 아래쪽 패딩 제거 */
+}
+/* 채팅 입력창이 고정될 수 있도록 여백 조정 */
+[data-testid="stSidebarContent"] {
+    padding-top: 1rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# 기존의 st.markdown("<h2 style='margin-top:0'>💬 유튜브 댓글분석기 — 챗봇</h2>", unsafe_allow_html=True) 는 제거합니다.
+# 대신, st.sidebar에 작은 제목과 설명을 넣어 채팅 영역을 최대한 확보합니다.
+with st.sidebar:
+    st.markdown("## 💬 유튜브 댓글 분석 챗봇")
+    st.info("여기는 순수한 **댓글 분석 챗봇 모드**입니다. 채팅에 집중할 수 있도록 메인 화면의 UI 요소가 최소화되었습니다. \n\n**첫 질문**에 댓글 수집이 시작되며, **후속 질문**은 수집된 댓글 샘플과 대화 맥락을 바탕으로 답변합니다.")
 
 BASE_DIR = "/tmp"; os.makedirs(BASE_DIR, exist_ok=True)
 KST = timezone(timedelta(hours=9))
@@ -371,6 +393,7 @@ def run_pipeline_first_turn(user_query: str):
     # 1) 해석
     if not GEMINI_API_KEYS:
         with st.chat_message("assistant"): st.markdown("Gemini API Key가 비어 있어요.")
+        # prog.empty() # 진행바 제거 로직 제거
         return
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
                                  timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
@@ -380,6 +403,7 @@ def run_pipeline_first_turn(user_query: str):
     # 2) 검색
     if not YT_API_KEYS:
         with st.chat_message("assistant"): st.markdown("YouTube API Key가 비어 있어요.")
+        # prog.empty() # 진행바 제거 로직 제거
         return
     start_dt = datetime.fromisoformat(schema["start_iso"]).astimezone(KST)
     end_dt   = datetime.fromisoformat(schema["end_iso"]).astimezone(KST)
@@ -414,6 +438,7 @@ def run_pipeline_first_turn(user_query: str):
         with st.chat_message("assistant"):
             st.markdown("지정 기간/키워드에서 댓글이 보이지 않아. 기간/키워드를 조정해줘.")
         st.session_state["chat"].append({"role":"assistant","content":"지정 기간/키워드에서 댓글이 보이지 않아. 기간/키워드를 조정해줘."})
+        # prog.empty() # 진행바 제거 로직 제거
         scroll_to_bottom()
         return
 
@@ -433,6 +458,7 @@ def run_pipeline_first_turn(user_query: str):
                                          timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
     answer_md = tidy_answer(answer_md_raw)
     prog.progress(1.0, text="완료")
+    # prog.empty() # 진행바 제거 로직 제거
 
     # 상태 저장
     st.session_state["last_schema"]   = schema
@@ -467,8 +493,10 @@ def run_followup_turn(user_query: str):
     # 최근 대화문맥
     lines = []
     for m in st.session_state["chat"][-10:]:
-        if m["role"] == "user": lines.append(f"[이전 Q]: {m['content']}")
-        else:                   lines.append(f"[이전 A]: {m['content']}")
+        # HTML 태그 제거 및 내용만 추출 (메타 정보가 포함된 경우)
+        content_text = re.sub(r'<div.*?/div>', '', m['content'], flags=re.DOTALL).strip()
+        if m["role"] == "user": lines.append(f"[이전 Q]: {content_text}")
+        else:                   lines.append(f"[이전 A]: {content_text}")
     context = "\n".join(lines)
 
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
@@ -489,6 +517,7 @@ def run_followup_turn(user_query: str):
                                          timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
     answer_md = tidy_answer(answer_md_raw)
     prog.progress(1.0, text="완료")
+    # prog.empty() # 진행바 제거 로직 제거
 
     with st.chat_message("assistant"):
         # 후속부터는 메타 반복 X
@@ -497,18 +526,18 @@ def run_followup_turn(user_query: str):
     scroll_to_bottom()
 
 # -------------------- 채팅 표시 & 입력 --------------------
-def render_chat():
-    for m in st.session_state["chat"]:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+# 채팅 기록을 표시
 render_chat()
 
+# 챗봇 입력창 (Streamlit 기본 기능으로 하단에 고정됨)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
 if prompt:
     st.session_state["chat"].append({"role":"user","content":prompt})
+    # 사용자 질문을 즉시 화면에 표시하고
     with st.chat_message("user"): st.markdown(prompt)
     scroll_to_bottom()
 
+    # 파이프라인 실행
     if st.session_state.get("last_csv"):
         # 후속질문: 재수집 없음
         run_followup_turn(prompt)
@@ -517,7 +546,8 @@ if prompt:
         run_pipeline_first_turn(prompt)
 
 # -------------------- 하단 도구 --------------------
-st.markdown("---")
+# 하단 도구는 채팅 UX와 분리되도록 화면 끝에 배치합니다.
+# st.markdown("---") # 불필요한 구분선 제거
 colx, coly = st.columns(2)
 with colx:
     if st.button("🔄 초기화", type="secondary"):
