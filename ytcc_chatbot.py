@@ -502,26 +502,31 @@ with st.container(border=True):
 # ===================== 해석 단계 =====================
 light_block = None
 schema = None
-if btn_parse or btn_run:
+if (btn_parse or btn_run) and user_query:
     if not GEMINI_API_KEYS:
         st.error("Gemini API Key가 없습니다. st.secrets에 GEMINI_API_KEYS를 설정하세요.")
     else:
-        with st.status("제미나이 해석 중…", expanded=True) as status:
-            payload = LIGHT_PROMPT.replace("{USER_QUERY}", user_query or "").replace("{NOW_KST_ISO}", to_iso_kst(now_kst()))
-            out = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", payload,
-                                       timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS,
-                                       on_rotate=lambda i, k: status.write(f"🔁 Gemini 키 전환 → #{i+1}"))
+        with st.status("제미나이 해석 중…", expanded=False) as status:
+            payload = LIGHT_PROMPT.replace("{USER_QUERY}", user_query or "")
+            out = call_gemini_rotating(
+                GEMINI_MODEL,
+                GEMINI_API_KEYS,
+                "",
+                payload,
+                timeout_s=GEMINI_TIMEOUT,
+                max_tokens=GEMINI_MAX_TOKENS,
+                on_rotate=lambda i, k: status.write(f"🔁 Gemini 키 전환 → #{i+1}")
+            )
             light_block = out
-            if btn_parse:
-            st.markdown("#### 🔎 라이트 요약 블록 (Gemini 원문)")
-            if btn_parse:
-            st.code(light_block or "(빈 응답)")
             schema = parse_light_block_to_schema(light_block or "")
-            if btn_parse:
-            st.markdown("#### 🧱 규격화 스키마")
-            if btn_parse:
-            st.json(schema)
             status.update(label="해석 완료", state="complete")
+
+        # 해석 결과는 '해석만' 버튼에서만 화면에 보여준다
+        if btn_parse and light_block:
+            st.markdown("#### 🔎 라이트 요약 블록 (Gemini 원문)")
+            st.code(light_block or "(빈 응답)")
+            st.markdown("#### 🧱 규격화 스키마")
+            st.json(schema)
 
 # ===================== 실행(수집→요약) =====================
 if btn_run and schema:
