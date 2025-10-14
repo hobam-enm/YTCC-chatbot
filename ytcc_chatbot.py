@@ -647,7 +647,14 @@ if btn_run and schema:
                                          x1=row["x"] + row["r"], y1=row["y"] + row["r"],
                                          line=dict(width=0), fillcolor=color, opacity=0.88, layer="below")
                     fig_kw.add_trace(go.Scatter(x=df_kw["x"], y=df_kw["y"], mode="text",
-                                      text=df_kw["label"], textposition="middl
+                                      text=df_kw["label"], textposition="middle center",
+                                      textfont=dict(color="white", size=df_kw["font_size"].tolist())))
+                    fig_kw.update_xaxes(visible=False, range=[-1.05, 1.05])
+                    fig_kw.update_yaxes(visible=False, range=[-1.05, 1.05], scaleanchor="x", scaleratio=1)
+                    fig_kw.update_layout(title="Top30 키워드 버블", plot_bgcolor="rgba(0,0,0,0)", margin=dict(l=0, r=0, t=40, b=0))
+                    st.plotly_chart(fig_kw, use_container_width=True)
+            except Exception as e:
+                st.info(f"키워드 버블 생성 실패: {e}")
             # 시점별 추이
             ts, label = timeseries_from_file(csv_path)
             if ts is not None and not ts.empty:
@@ -672,10 +679,33 @@ if btn_run and schema:
                         f"</div>", unsafe_allow_html=True
                     )
 
+            # ③ Top10 영상 댓글수 / ④ 작성자 활동량 Top10
+            if df_stats is not None and not df_stats.empty:
+                colx, coly = st.columns(2)
+                with colx:
+                    top_vids = df_stats.sort_values(by="commentCount", ascending=False).head(10).copy()
+                    if not top_vids.empty:
+                        top_vids["title_short"] = top_vids["title"].apply(lambda t: t[:20] + "…" if isinstance(t, str) and len(t) > 20 else t)
+                        fig_vids = px.bar(top_vids, x="commentCount", y="title_short", orientation="h", text="commentCount", title="Top10 영상 댓글수")
+                        st.plotly_chart(fig_vids, use_container_width=True)
+                with coly:
+                    counts = {}
+                    for chunk in pd.read_csv(csv_path, usecols=["author"], chunksize=200_000):
+                        vc = chunk["author"].astype(str).value_counts()
+                        for k, v in vc.items():
+                            counts[k] = counts.get(k, 0) + int(v)
+                    if counts:
+                        ta = pd.Series(counts).sort_values(ascending=False).head(10).reset_index().rename(columns={"index":"author",0:"count"})
+                        fig_auth = px.bar(ta, x="count", y="author", orientation="h", text="count", title="Top10 댓글 작성자 활동량")
+                        st.plotly_chart(fig_auth, use_container_width=True)
+
             # 다운로드
             st.markdown("---")
             with open(csv_path, "rb") as f:
                 st.download_button("⬇️ 전체 댓글 CSV", data=f.read(), file_name=f"chatbot_full_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv")
+            if df_stats is not None and not df_stats.empty:
+                csv_videos = df_stats.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+                st.download_button("⬇️ 전체 영상목록 CSV", data=csv_videos, file_name=f"chatbot_videos_{len(df_stats)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv" )
 
 # ===================== 하단 도구 =====================
 st.markdown("---")
