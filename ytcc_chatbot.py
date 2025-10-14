@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-# 💬 유튜브 댓글분석기 — 챗봇 모드 (기본 UI, 대화형)
-# - 자연어 한 줄 → (기간/키워드/옵션) 해석 → 영상 수집 → 댓글 수집(스트리밍) → 요약/정량
-# - 첫 실행 이후 후속질문은 재수집 없이: [기존 샘플 + 기존 대화맥락]만으로 답변
+# 💬 유튜브 댓글분석기 — 챗봇 모드 (대화형 + 정량 항상 유지)
 
 import streamlit as st
 import pandas as pd
-import os, re, gc, time, json
+import os, re, gc, time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import Counter
@@ -22,16 +20,11 @@ import numpy as np
 from kiwipiepy import Kiwi
 import stopwordsiso as stopwords
 
-# =====================================================
-# 기본 설정
-# =====================================================
+# ============== 기본 설정 ==============
 st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇 모드", layout="wide", initial_sidebar_state="collapsed")
 st.title("💬 유튜브 댓글분석기: 챗봇 모드 (베타)")
 
-# ===================== 경로/상수 =====================
-BASE_DIR = "/tmp"
-os.makedirs(BASE_DIR, exist_ok=True)
-
+BASE_DIR = "/tmp"; os.makedirs(BASE_DIR, exist_ok=True)
 KST = timezone(timedelta(hours=9))
 MAX_TOTAL_COMMENTS = 120_000
 MAX_COMMENTS_PER_VIDEO = 4_000
@@ -40,53 +33,31 @@ GEMINI_MODEL = st.secrets.get("GEMINI_MODEL", "gemini-2.0-flash-lite")
 GEMINI_TIMEOUT = int(st.secrets.get("GEMINI_TIMEOUT", 120))
 GEMINI_MAX_TOKENS = int(st.secrets.get("GEMINI_MAX_TOKENS", 2048))
 
-# ===================== 비밀키 =====================
-_YT_FALLBACK = []
-_GEM_FALLBACK = []
+_YT_FALLBACK = []; _GEM_FALLBACK = []
 YT_API_KEYS = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
 
-# ===================== 유틸 =====================
-def now_kst() -> datetime:
-    return datetime.now(tz=KST)
-
+def now_kst(): return datetime.now(tz=KST)
 def to_iso_kst(dt: datetime) -> str:
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=KST)
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=KST)
     return dt.astimezone(KST).isoformat(timespec="seconds")
-
 def kst_to_rfc3339_utc(dt_kst: datetime) -> str:
-    if dt_kst.tzinfo is None:
-        dt_kst = dt_kst.replace(tzinfo=KST)
-    return dt_kst.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    if dt_kst.tzinfo is None: dt_kst = dt_kst.replace(tzinfo=KST)
+    return dt_kst.astimezone(timezone.utc).isoformat().replace("+00:00","Z")
 
 def safe_rerun():
-    fn = getattr(st, "rerun", None)
+    fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
     if callable(fn): return fn()
-    fn_old = getattr(st, "experimental_rerun", None)
-    if callable(fn_old): return fn_old()
     raise RuntimeError("No rerun function available.")
 
-# ===================== 키 로테이터 =====================
+# ============== 키 로테이터/YouTube ==============
 class RotatingKeys:
-    def __init__(self, keys, state_key: str, on_rotate=None, treat_as_strings: bool = True):
-        cleaned = []
-        for k in (keys or []):
-            if k is None: continue
-            if treat_as_strings and isinstance(k, str):
-                ks = k.strip()
-                if ks: cleaned.append(ks)
-            else:
-                cleaned.append(k)
-        self.keys = cleaned[:10]
-        self.state_key = state_key
-        self.on_rotate = on_rotate
-        idx = st.session_state.get(state_key, 0)
-        self.idx = 0 if not self.keys else (idx % len(self.keys))
+    def __init__(self, keys, state_key: str, on_rotate=None):
+        self.keys = [k.strip() for k in (keys or []) if isinstance(k,str) and k.strip()][:10]
+        self.state_key = state_key; self.on_rotate = on_rotate
+        self.idx = st.session_state.get(state_key, 0) % max(1, len(self.keys))
         st.session_state[state_key] = self.idx
-    def current(self):
-        if not self.keys: return None
-        return self.keys[self.idx % len(self.keys)]
+    def current(self): return self.keys[self.idx] if self.keys else None
     def rotate(self):
         if not self.keys: return
         self.idx = (self.idx + 1) % len(self.keys)
@@ -98,66 +69,48 @@ class RotatingYouTube:
         self.rot = RotatingKeys(keys, state_key, on_rotate=lambda i, k: log and log(f"🔁 YouTube 키 전환 → #{i+1}"))
         self.log = log
         key = self.rot.current()
-        if not key:
-            raise RuntimeError("YouTube API Key가 비어 있습니다.")
-        self.svc = build("youtube", "v3", developerKey=key)
+        if not key: raise RuntimeError("YouTube API Key가 비어 있습니다.")
+        self.svc = build("youtube","v3",developerKey=key)
     def execute(self, factory):
         try:
             return factory(self.svc).execute()
         except HttpError as e:
-            status = getattr(getattr(e, 'resp', None), 'status', None)
-            msg = (getattr(e, 'content', b'').decode('utf-8', errors='ignore') or '').lower()
-            quotaish = (status in (403, 429)) and any(t in msg for t in ["quota", "rate", "limit"])
-            if quotaish and len(YT_API_KEYS) > 1:
-                self.rot.rotate(); self.svc = build("youtube", "v3", developerKey=self.rot.current())
+            status = getattr(getattr(e,'resp',None),'status',None)
+            msg = (getattr(e,'content',b'').decode('utf-8','ignore') or '').lower()
+            if status in (403,429) and any(t in msg for t in ["quota","rate","limit"]) and len(YT_API_KEYS)>1:
+                self.rot.rotate(); self.svc = build("youtube","v3",developerKey=self.rot.current())
                 return factory(self.svc).execute()
             raise
 
-# ===================== Gemini 호출 =====================
+# ============== Gemini 호출/프롬프트 ==============
 def is_gemini_quota_error(exc: Exception) -> bool:
     msg = (str(exc) or "").lower()
     return ("429" in msg) or ("too many requests" in msg) or ("rate limit" in msg) or ("resource exhausted" in msg) or ("quota" in msg)
 
-def call_gemini_rotating(
-    model_name: str,
-    keys,
-    system_instruction: str,
-    user_payload: str,
-    timeout_s: int = GEMINI_TIMEOUT,
-    max_tokens: int = GEMINI_MAX_TOKENS,
-    on_rotate=None
-) -> str:
-    rot = RotatingKeys(keys, state_key="gem_key_idx", on_rotate=lambda i, k: on_rotate and on_rotate(i, k))
-    if not rot.current():
-        raise RuntimeError("Gemini API Key가 비어 있습니다.")
-    attempts = 0
-    max_attempts = len(rot.keys) if rot.keys else 1
+def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
+                         timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS, on_rotate=None) -> str:
+    rot = RotatingKeys(keys, "gem_key_idx", on_rotate=lambda i,k: on_rotate and on_rotate(i,k))
+    if not rot.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
+    attempts = 0; max_attempts = len(rot.keys) if rot.keys else 1
     while attempts < max_attempts:
         try:
             genai.configure(api_key=rot.current())
-            model = genai.GenerativeModel(
-                model_name,
-                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens, "top_p": 0.9}
-            )
+            model = genai.GenerativeModel(model_name, generation_config={"temperature":0.2,"max_output_tokens":max_tokens,"top_p":0.9})
             resp = model.generate_content([system_instruction, user_payload], request_options={"timeout": timeout_s})
-            out = getattr(resp, "text", None)
-            if not out and hasattr(resp, "candidates") and resp.candidates:
-                c0 = resp.candidates[0]
-                if hasattr(c0, "content") and getattr(c0.content, "parts", None):
-                    p0 = c0.content.parts[0]
-                    if hasattr(p0, "text"):
-                        out = p0.text
+            out = getattr(resp,"text",None)
+            if not out and getattr(resp,"candidates",None):
+                parts = getattr(resp.candidates[0].content,"parts",None)
+                if parts and hasattr(parts[0],"text"): out = parts[0].text
             return out or ""
         except Exception as e:
-            if is_gemini_quota_error(e) and len(rot.keys) > 1:
+            if is_gemini_quota_error(e) and len(rot.keys)>1:
                 rot.rotate(); attempts += 1; continue
             raise
 
-# ===================== 자연어 → 라이트 요약 프롬프트 =====================
 LIGHT_PROMPT = (
-    "역할: 당신은 ‘유튜브 댓글 반응 분석기’를 위한 자연어 해석가다.\n"
-    "목표: 요청에서 [검색 기간(KST)]과 [검색 키워드(주제/엔티티/보조어)]와 옵션을 해석하라.\n"
-    "원칙: 상대기간의 종료는 지금(KST). 절대기간은 그대로. 고유명사 원문 보존.\n\n"
+    "역할: ‘유튜브 댓글 반응 분석기’의 자연어 해석가.\n"
+    "목표: 요청에서 [검색기간(KST)]과 [키워드/엔티티] 및 옵션을 해석.\n"
+    "규칙: 상대기간의 종료=지금(KST), 절대기간은 그대로.\n\n"
     "출력 6줄 고정:\n"
     "- 한 줄 요약: <문장>\n"
     "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
@@ -203,7 +156,7 @@ def parse_light_block_to_schema(light_text: str) -> dict:
         keywords = [m[0]] if m else ["유튜브"]
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
-# ===================== YouTube 검색/통계 =====================
+# ============== YouTube 검색/통계/댓글 ==============
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     vids, token = [], None
     while len(vids) < max_results:
@@ -251,7 +204,6 @@ def yt_video_statistics(rt, video_ids):
         time.sleep(0.25)
     return rows
 
-# ===================== 댓글 수집(스레드) + CSV 스트리밍 =====================
 def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None):
     replies, token = [], None
     while True:
@@ -326,11 +278,11 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
             done += 1
             if prog:
                 frac = 0.35 + (done/total_videos) * 0.50  # 35%→85%
-                prog.progress(min(0.85, frac), text="댓글수집중…")
+                prog.progress(min(0.85, frac), text="댓글 수집중…")
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-# ===================== LLM 직렬화 샘플 =====================
+# ============== LLM 직렬화 샘플 ==============
 def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars_per_comment=280, max_total_chars=420_000):
     if not csv_path or not os.path.exists(csv_path): return "", 0, 0
     lines, total = [], 0; remaining = max_rows
@@ -350,7 +302,7 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars
         if remaining <= 0 or total >= max_total_chars: break
     return "\n".join(lines), len(lines), total
 
-# ===================== 정량 분석 (심플모드와 동일) =====================
+# ============== 정량(심플모드 동일) ==============
 kiwi = Kiwi()
 korean_stopwords = stopwords.stopwords("ko")
 
@@ -446,10 +398,8 @@ def render_quant_viz_from_paths(comments_csv_path: str, df_stats: pd.DataFrame, 
                     stopset.update(query_words)
                 items = compute_keyword_counter_from_file(comments_csv_path, list(stopset), per_comment_cap=200)
                 fig = keyword_bubble_figure_from_counter(items)
-                if fig is None:
-                    st.info("표시할 키워드가 없습니다.")
-                else:
-                    st.plotly_chart(fig, use_container_width=True)
+                if fig is None: st.info("표시할 키워드가 없습니다.")
+                else: st.plotly_chart(fig, use_container_width=True)
             except Exception as e:
                 st.info(f"키워드 분석 불가: {e}")
     with col2:
@@ -467,9 +417,10 @@ def render_quant_viz_from_paths(comments_csv_path: str, df_stats: pd.DataFrame, 
             with st.container(border=True):
                 st.markdown("**③ Top10 영상 댓글수**")
                 top_vids = df_stats.sort_values(by="commentCount", ascending=False).head(10).copy()
-                top_vids["title_short"] = top_vids["title"].apply(lambda t: t[:20] + "…" if isinstance(t, str) and len(t) > 20 else t)
-                fig_vids = px.bar(top_vids, x="commentCount", y="title_short", orientation="h", text="commentCount")
-                st.plotly_chart(fig_vids, use_container_width=True)
+                if not top_vids.empty:
+                    top_vids["title_short"] = top_vids["title"].apply(lambda t: t[:20] + "…" if isinstance(t, str) and len(t) > 20 else t)
+                    fig_vids = px.bar(top_vids, x="commentCount", y="title_short", orientation="h", text="commentCount")
+                    st.plotly_chart(fig_vids, use_container_width=True)
         with col4:
             with st.container(border=True):
                 st.markdown("**④ 작성자 활동량 Top10**")
@@ -498,7 +449,7 @@ def render_quant_viz_from_paths(comments_csv_path: str, df_stats: pd.DataFrame, 
                     f"</div>", unsafe_allow_html=True
                 )
 
-# ===================== 상태 =====================
+# ============== 상태 & 챗 렌더러 ==============
 def ensure_state():
     defaults = dict(
         chat=[],                 # [(role, text_md, meta_html)]
@@ -511,12 +462,11 @@ def ensure_state():
         if k not in st.session_state: st.session_state[k]=v
 ensure_state()
 
-# 대화 렌더러
-def _render_chat():
-    if not st.session_state['chat']:
-        st.info("한 줄로 요청을 입력해 시작하세요. 예) 최근 12시간 태풍상사 김준호 댓글반응 분석해줘")
-        return
+def render_chat():
     st.markdown("### 대화 내역")
+    if not st.session_state['chat']:
+        st.caption("예) 최근 12시간 태풍상사 김준호 댓글반응 분석해줘")
+        return
     for role, text, meta in st.session_state['chat']:
         if role == 'user':
             st.markdown(f"**👤 사용자**: {text}")
@@ -525,23 +475,17 @@ def _render_chat():
                 st.caption(meta)
             st.markdown(text or "_응답 없음_")
 
-# ===================== 입력바 =====================
-_render_chat()
+# ============== 상단: 입력/전송 ==============
+render_chat()
 st.markdown("---")
 col1, col2 = st.columns([7,1])
-user_query = col1.text_input(
-    "챗봇에게 말하듯 입력하세요",
-    placeholder="예) 최근 12시간 태풍상사 김준호 댓글반응 분석해줘",
-    key="cb_query",
-)
+user_query = col1.text_input("챗봇에게 말하듯 입력하세요", key="cb_query",
+                             placeholder="예) 최근 12시간 태풍상사 댓글반응 분석해줘")
 btn_run = col2.button("전송", use_container_width=True)
 
-# ===================== 실행/후속질문 =====================
+# ============== 실행 로직 ==============
 if btn_run and user_query:
-    # 사용자 발화 저장
     st.session_state['chat'].append(('user', user_query, None))
-
-    # 후속질문 여부: 이전 수집 결과가 있으면 재수집 금지
     followup = bool(st.session_state.get('last_csv'))
     prog = st.progress(0.0, text=("해석중…" if not followup else "맥락 구성중…"))
 
@@ -550,10 +494,11 @@ if btn_run and user_query:
         if not GEMINI_API_KEYS:
             st.session_state['chat'].append(('assistant', 'Gemini API Key가 없습니다.', None)); st.stop()
         payload = LIGHT_PROMPT.replace("{USER_QUERY}", user_query)
-        light_text = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", payload, timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+        light_text = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", payload,
+                                          timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
         schema = parse_light_block_to_schema(light_text)
         st.session_state['last_schema'] = schema
-        prog.progress(0.20, text="영상수집중…")
+        prog.progress(0.20, text="영상 수집중…")
 
         # 2) 영상 검색/통계
         if not YT_API_KEYS:
@@ -562,8 +507,7 @@ if btn_run and user_query:
         end_dt   = datetime.fromisoformat(schema["end_iso"]).astimezone(KST)
         published_after = kst_to_rfc3339_utc(start_dt)
         published_before = kst_to_rfc3339_utc(end_dt)
-        keywords = schema.get("keywords", [])
-        entities = schema.get("entities", [])
+        keywords = schema.get("keywords", []); entities = schema.get("entities", [])
         include_replies = bool(schema.get("options",{}).get("include_replies", False))
 
         rt = RotatingYouTube(YT_API_KEYS)
@@ -573,7 +517,6 @@ if btn_run and user_query:
             for e in (entities or []):
                 all_ids += yt_search_videos(rt, f"{base_kw} {e}", 30, "relevance", published_after, published_before)
         all_ids = list(dict.fromkeys(all_ids))
-
         df_stats = pd.DataFrame(yt_video_statistics(rt, all_ids))
         if not df_stats.empty and "publishedAt" in df_stats.columns:
             df_stats["publishedAt_kst"] = (
@@ -581,8 +524,8 @@ if btn_run and user_query:
                 .dt.tz_convert("Asia/Seoul").dt.strftime("%Y-%m-%d %H:%M:%S")
             )
 
-        # 3) 댓글 수집 (스트리밍)
-        prog.progress(0.35, text="댓글수집중…")
+        # 3) 댓글 수집
+        prog.progress(0.35, text="댓글 수집중…")
         csv_path, total_cnt = parallel_collect_comments_streaming(
             video_list=df_stats.to_dict('records'),
             rt_keys=YT_API_KEYS,
@@ -592,11 +535,11 @@ if btn_run and user_query:
             prog=prog
         )
         if total_cnt == 0:
-            st.session_state['chat'].append(('assistant', '수집된 댓글이 없습니다. 기간/키워드를 조정해 보세요.', None))
+            st.session_state['chat'].append(('assistant', '수집된 댓글이 없습니다. 기간/키워드를 조정해 주세요.', None))
             st.stop()
 
-        # 4) 요약 (첫 답변)
-        prog.progress(0.90, text="AI분석중…")
+        # 4) AI 요약
+        prog.progress(0.90, text="AI 분석중…")
         sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
         st.session_state['sample_text'] = sample_text
         st.session_state['last_csv'] = csv_path
@@ -604,24 +547,27 @@ if btn_run and user_query:
 
         sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
                "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
-               "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
+               "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라. 반드시 샘플을 근거로 작성.")
         payload = (
             f"[키워드]: {', '.join(keywords)}\n"
             f"[엔티티]: {', '.join(entities)}\n"
             f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
             f"[댓글 샘플]:\n{sample_text}\n"
         )
-        out = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload, timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+        answer_md = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
+                                         timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+        if not answer_md.strip():
+            answer_md = "_AI 요약 응답이 비었습니다. 질문을 조금 더 구체적으로 입력해 보세요._"
 
         meta_html = f"분석키워드: {', '.join(keywords) if keywords else '(없음)'}  |  기간: {schema['start_iso']} ~ {schema['end_iso']}"
-        st.session_state['chat'].append(('assistant', out, meta_html))
+        st.session_state['chat'].append(('assistant', answer_md, meta_html))
         prog.progress(1.0, text="완료")
 
     else:
-        # ===== 후속질문: 재수집 없이 =====
+        # ===== 후속질문: 재수집 없이 (샘플+대화맥락) =====
         schema = st.session_state.get('last_schema') or {}
         sample_text = st.session_state.get('sample_text', '')
-        # 최근 대화 일부를 맥락으로 전달
+        # 최근 대화 10턴을 맥락으로
         lines = []
         for role, text, _ in st.session_state['chat'][-10:]:
             if role == 'user': lines.append(f"[이전 Q]: {text}")
@@ -638,13 +584,16 @@ if btn_run and user_query:
             f"[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n"
             f"[댓글 샘플]:\n{sample_text}\n"
         )
-        out = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload, timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+        answer_md = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
+                                         timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+        if not answer_md.strip():
+            answer_md = "_AI 요약 응답이 비었습니다. 다른 각도의 질문으로 이어가 주세요._"
 
         meta_html = f"분석키워드: {', '.join(schema.get('keywords', [])) or '(없음)'}  |  기간: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}"
-        st.session_state['chat'].append(('assistant', out, meta_html))
+        st.session_state['chat'].append(('assistant', answer_md, meta_html))
         prog.progress(1.0, text="완료")
 
-# ===================== 정량 & 다운로드 (항상 유지) =====================
+# ============== 정량 & 다운로드: 항상 유지 ==============
 if st.session_state.get("last_csv"):
     st.markdown("---")
     render_quant_viz_from_paths(
@@ -664,7 +613,7 @@ if st.session_state.get("last_csv"):
                            file_name=f"chatbot_videos_{len(df_stats_dl)}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                            mime="text/csv")
 
-# ===================== 하단 도구 =====================
+# ============== 하단 도구 ==============
 st.markdown("---")
 colx, coly = st.columns(2)
 with colx:
