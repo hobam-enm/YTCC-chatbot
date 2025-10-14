@@ -11,6 +11,9 @@ from datetime import datetime, timedelta, timezone
 import requests
 import json
 
+# === 0. 페이지 설정 (반드시 모든 st.xxx 호출 중 가장 먼저 와야 함) ===
+st.set_page_config(page_title="💬 유튜브 댓글 분석 챗봇", layout="wide")
+
 # ===== 1. 기본 설정 및 유틸리티 함수 (ytccai_cloud.py 및 ytcc_chatbot.py 기반) =====
 
 # 사용자 요청에 따라 Streamlit Secrets에서 API 키를 로드하도록 수정합니다.
@@ -196,9 +199,6 @@ if "messages" not in st.session_state:
     st.session_state.messages.append({"role": "assistant", "content": 
         "안녕하세요! 유튜브 댓글 분석 챗봇입니다. 🤖\n\n먼저 **분석하고 싶은 YouTube 영상 URL**을 입력해주세요. URL 입력 후 댓글에 대해 자유롭게 질문해주세요. (예: '신제품에 대한 반응이 어때?', '가장 좋아요를 많이 받은 댓글은 뭐야?')"
     })
-
-st.set_page_config(page_title="💬 유튜브 댓글 분석 챗봇", layout="wide")
-st.title("💬 YouTube 댓글 분석 챗봇")
 
 # --- Chat Display ---
 for message in st.session_state.messages:
