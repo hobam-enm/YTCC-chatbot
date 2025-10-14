@@ -317,6 +317,13 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars
         if remaining <= 0 or total >= max_total_chars: break
     return "\n".join(lines), len(lines), total
 
+# ===================== 하단: 정량 & 다운로드 (항상 유지) =====================
+if st.session_state.get('last_csv'):
+    st.markdown("---")
+    st.markdown('<div class="chat-wrap"><h4 style="margin:8px 0">📊 정량 하이라이트</h4></div>', unsafe_allow_html=True)
+    # (여기에 기존의 버블/추이/Top10/다운로드 코드 그대로 이동)
+
+
 # -------------------- 정량 분석 (심플모드 전부) --------------------
 kiwi = Kiwi()
 korean_stopwords = stopwords.stopwords("ko")
