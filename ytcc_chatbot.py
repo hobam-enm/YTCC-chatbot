@@ -42,7 +42,7 @@ footer {visibility: hidden;}
 /* 채팅 메시지 기본 스타일 */
 [data-testid="stChatMessage"] {
     width: fit-content;
-    max-width: 80%; /* 너무 길어지지 않도록 */
+    max-width: 80%;
     margin-bottom: 1rem;
     padding: 0.75rem 1rem;
     border-radius: 18px;
@@ -52,7 +52,16 @@ footer {visibility: hidden;}
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
     background-color: #f0f2f6;
     color: #050505;
+    **border: 1px solid #d1d5db; /* 대화상자 느낌을 위한 테두리 추가 */**
 }
+
+**/* AI 답변 내부 텍스트 스타일 (글씨 크기 줄이기) */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ol,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ul {
+    font-size: 0.95rem;
+}**
 
 /* 사용자 질문 (user) 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
