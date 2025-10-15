@@ -340,7 +340,23 @@ class RotatingYouTube:
                 return factory(self.service).execute()
             raise
 
-LIGHT_PROMPT = (f"역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n규칙:\n- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n출력(6줄 고정):\n- 한 줄 요약: <문장>\n- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n- 키워드: [<메인1>, <메인2>…]\n- 엔티티/보조: [<보조들>]\n- 옵션: {{ include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }}\n- 원문: {{USER_QUERY}}\n\n현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}")
+LIGHT_PROMPT = (
+    "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
+    "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
+    "규칙:\n"
+    "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
+    "- **'키워드'는 검색에 사용할 가장 핵심적인 주제(프로그램, 브랜드 등) 1개로 한정한다.**\n"
+    "- **'엔티티/보조'는 키워드 검색 결과 내에서 분석의 초점이 될 인물, 세부 주제 등을 포함한다.**\n"
+    "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
+    "출력(6줄 고정):\n"
+    "- 한 줄 요약: <문장>\n"
+    "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
+    "- 키워드: [<핵심 키워드 1개>]\n"
+    "- 엔티티/보조: [<인물>, <세부 주제 등>]\n"
+    "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
+    "- 원문: {USER_QUERY}\n\n"
+    f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
+)
 
 def is_gemini_quota_error(exc: Exception) -> bool:
     msg = (str(exc) or "").lower()
