@@ -79,7 +79,11 @@ ensure_state()
 # 대신, st.sidebar에 작은 제목과 설명을 넣어 채팅 영역을 최대한 확보합니다.
 with st.sidebar:
     st.markdown("## 💬 유튜브 댓글 분석 챗봇")
-    st.info("여기는 순수한 **댓글 분석 챗봇 모드**입니다. 채팅에 집중할 수 있도록 메인 화면의 UI 요소가 최소화되었습니다. \n\n**첫 질문**에 댓글 수집이 시작되며, **후속 질문**은 수집된 댓글 샘플과 대화 맥락을 바탕으로 답변합니다.")
+    
+    # ****************** 수정된 안내 문구 ******************
+    st.info("이 챗봇은 유튜브 댓글 분석에 최적화된 도구입니다. "
+            "**첫 질문 시** 댓글 수집 및 AI 분석이 시작되며, "
+            "이후 **후속 질문**은 **캐시된 댓글 샘플**을 기반으로 초고속 답변을 제공합니다.")
     
     # -------------------- CSV 다운로드 기능 추가 --------------------
     csv_path = st.session_state.get("last_csv")
@@ -110,7 +114,7 @@ with st.sidebar:
         except Exception:
             st.warning("다운로드할 댓글 CSV 파일을 읽는 데 실패했습니다.")
 
-    # 2. 영상 데이터 다운로드 (추가 요청 사항)
+    # 2. 영상 데이터 다운로드 (수정: 한글 깨짐 방지용 utf-8-sig 인코딩 적용)
     if df_videos is not None and not df_videos.empty:
         try:
             # Pandas DataFrame을 CSV 문자열로 변환 (인코딩: utf-8-sig로 설정하여 엑셀에서 깨짐 방지)
@@ -144,6 +148,11 @@ with st.sidebar:
         st.session_state.clear()
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
+
+    # ****************** 문의 정보 추가 ******************
+    st.markdown("---")
+    st.markdown("### 📞 문의")
+    st.markdown("미디어)디지털마케팅 데이터파트 **김호범**")
 
 
 def safe_rerun():
@@ -508,7 +517,9 @@ def run_pipeline_first_turn(user_query: str):
 
     # 4) AI 요약
     prog.progress(0.90, text="AI 분석중…")
+    # ****************** 캐시 데이터 생성 ******************
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
+    # ****************************************************
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
            "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
            "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
@@ -524,14 +535,15 @@ def run_pipeline_first_turn(user_query: str):
     prog.progress(1.0, text="완료")
     # prog.empty() # 진행바 제거 로직 제거
 
-    # 상태 저장
+    # ****************** 상태 저장 (캐시) ******************
     st.session_state["last_schema"]   = schema
     st.session_state["last_csv"]      = csv_path
     st.session_state["last_df"]       = df_stats # 영상 데이터프레임 저장
-    st.session_state["sample_text"]   = sample_text
+    st.session_state["sample_text"]   = sample_text # 댓글 샘플 텍스트 캐시
     st.session_state["last_keywords"] = kw_main
     st.session_state["last_entities"] = kw_ent
     st.session_state["last_period"]   = (schema["start_iso"], schema["end_iso"])
+    # ****************************************************
 
     # 메타(한 번만)
     meta_html = (
@@ -554,6 +566,7 @@ def run_pipeline_first_turn(user_query: str):
 # -------------------- 후속 질문 (재수집 없음) --------------------
 def run_followup_turn(user_query: str):
     schema = st.session_state.get("last_schema") or {}
+    # ****************** 캐시된 댓글 샘플 사용 ******************
     sample_text = st.session_state.get("sample_text","")
 
     # 최근 대화문맥
@@ -573,7 +586,7 @@ def run_followup_turn(user_query: str):
         context + "\n\n" +
         f"[현재 질문]: {user_query}\n"
         f"[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n"
+        f"[댓글 샘플]:\n{sample_text}\n" # 캐시된 텍스트 사용
     )
 
     # 요청하신 대로 st.progress 대신 st.spinner로 대체하여 로딩 표시
@@ -592,12 +605,12 @@ def run_followup_turn(user_query: str):
 # -------------------- 채팅 표시 & 입력 --------------------
 # 초기 화면 안내 메시지 추가 (요청 사항)
 if not st.session_state["chat"]:
-    st.info("""
-    **💬 분석을 시작하려면 질문을 입력하세요.**
-
-    **기간**과 **키워드**(인물/배우/IP 등)를 명시하여 질문해보세요.
-    - **예시 1:** `최근 24시간 태풍상사 반응`
-    - **예시 2:** `5월 10일부터 지금까지 이준호 반응`
+    st.markdown("""
+    ## 💬 분석을 시작하려면 질문을 입력하세요.
+    **기간**과 **키워드**(인물/배우/IP 등)를 명시하여 분석을 시작할 수 있습니다.
+    
+    > **💡 예시 1:** `최근 24시간 태풍상사 반응`
+    > **💡 예시 2:** `5월 10일부터 지금까지 이준호 반응`
     """)
 
 
@@ -614,8 +627,8 @@ if prompt:
 
     # 파이프라인 실행
     if st.session_state.get("last_csv"):
-        # 후속질문: 재수집 없음
+        # 후속질문: 재수집 없음 (캐시 사용)
         run_followup_turn(prompt)
     else:
-        # 첫 질문: 파이프라인 전체
+        # 첫 질문: 파이프라인 전체 (캐시 생성)
         run_pipeline_first_turn(prompt)
