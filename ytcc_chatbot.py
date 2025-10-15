@@ -266,6 +266,7 @@ if 'session_to_rename' in st.session_state:
 # -------------------- 사이드바 --------------------
 with st.sidebar:
     st.markdown(f'<h2 style="font-weight: 600; font-size: 1.6rem; margin-bottom: 1.5rem; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">💬 유튜브 댓글분석: AI 챗봇</h2>', unsafe_allow_html=True)
+    st.markdown(####"""<hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트</p>""", unsafe_allow_html=True)
     st.markdown("""<style>[data-testid="stSidebarUserContent"] { display: flex; flex-direction: column; height: calc(100vh - 4rem); } .sidebar-top-section { flex-grow: 1; overflow-y: auto; } .sidebar-bottom-section { flex-shrink: 0; }</style>""", unsafe_allow_html=True)
     st.markdown('<div class="sidebar-top-section">', unsafe_allow_html=True)
     
@@ -302,7 +303,6 @@ with st.sidebar:
         except Exception as e: st.error("기록 로딩 실패")
     st.markdown('</div>', unsafe_allow_html=True)
     st.markdown('<div class="sidebar-bottom-section">', unsafe_allow_html=True)
-    st.markdown("""<hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트 김호범</p>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # -------------------- 로직 (이하 복원) --------------------
