@@ -181,8 +181,6 @@ def render_metadata_and_downloads():
             with col3:
                 st.download_button("영상목록", video_csv_data, video_file_name, "text/csv")
 
-        st.markdown('</div>', unsafe_allow_html=True)
-
 def render_chat():
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
