@@ -668,7 +668,7 @@ else:
     render_chat()
     scroll_to_bottom()
 
-if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
+if prompt := st.chat_input("예) 최근 24시간 태풍상사 반응 요약해줘"):
     st.session_state.chat.append({"role": "user", "content": prompt})
     st.rerun()
 
