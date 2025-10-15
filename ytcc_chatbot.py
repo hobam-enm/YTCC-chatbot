@@ -656,6 +656,8 @@ def run_followup_turn(user_query: str):
            "3. **'수치(정량)'를 물었을 때**: '몇 개야?', '비중이 어때?' 와 같은 질문에는 `[댓글 샘플]` 내에서 키워드 언급 횟수를 직접 세어 **'약 O회 언급됩니다' 또는 'A가 B보다 더 많이 언급됩니다'** 와 같이 숫자를 중심으로 간결하게 답변하라.\n\n"
            "4. **동문서답 절대 금지**: 만약 직전 답변에서 '언급 횟수는 10회입니다'라고 이미 답했다면, 사용자가 다시 '내용이 어때?'라고 물었을 때 **절대 '10회 언급됩니다'라고 반복하지 마라.** 사용자는 이제 그 10개의 '내용'을 궁금해하는 것이다.\n\n"
            "5. **언급 금지**: 답변 시 '댓글 샘플'이라는 단어를 직접적으로 언급하지 마라.")
+           "6. **반복 금지**: 답변 시 이전 답변 내용을 반복하거나, 동일내용을 절대 반복하지마라.")
+    
     payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n[댓글 샘플]:\n{sample_text}\n"
     with st.spinner("💬 AI가 답변을 구성 중입니다..."): response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
     return response
