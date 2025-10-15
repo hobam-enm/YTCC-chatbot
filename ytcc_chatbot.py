@@ -143,23 +143,7 @@ def render_metadata_and_downloads():
         end_dt_str = end_iso.split('T')[0] if end_iso else ""
 
     # 분석 컨텍스트와 다운로드를 하나의 박스 안에 넣기 위해 컨테이너 사용
-    with st.container():
-        # CSS를 사용하여 컨테이너에 박스 스타일 적용
-        st.markdown("""
-        <style>
-            .context-container {
-                font-size:14px;
-                color:#4b5563;
-                padding: 12px 15px;
-                border-radius:8px;
-                border:1px solid #e5e7eb;
-                background-color: #f9fafb;
-                margin-bottom: 1rem;
-            }
-        </style>
-        """, unsafe_allow_html=True)
-        st.markdown('<div class="context-container">', unsafe_allow_html=True)
-
+    with st.container(border=True):
         # 1. 분석 컨텍스트 정보 표시
         st.markdown(
             f"**📊 현재 분석 컨텍스트:**<br>"
@@ -189,8 +173,9 @@ def render_metadata_and_downloads():
             video_file_name = f"videos_{keywords_str}_{now_str}.csv"
 
             # 레이아웃 구성
-            col1, col2, col3 = st.columns([1.5, 1, 1, 6.5])
-            col1.markdown("<span style='font-weight:600;'>다운로드 :</span>", unsafe_allow_html=True)
+            # [오류 수정] 4개의 컬럼을 4개의 변수로 받도록 수정
+            col1, col2, col3, _ = st.columns([1.5, 1.2, 1.2, 6.1])
+            col1.markdown("<span style='font-weight:600; font-size: 14px;'>다운로드 :</span>", unsafe_allow_html=True)
             with col2:
                 st.download_button("전체댓글", comment_csv_data, comment_file_name, "text/csv")
             with col3:
