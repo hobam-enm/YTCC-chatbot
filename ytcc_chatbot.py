@@ -68,7 +68,7 @@ MAX_COMMENTS_PER_VID = 4_000
 def ensure_state():
     defaults = dict(
         chat=[],                 # [{role, content}]  (content: markdown)
-        meta_shown=False,        # 메타(키워드/기간) 표시했는지 여부 (첫 답변에만) - 사용하지 않음
+        meta_shown=False,
         last_schema=None,        # dict
         last_csv="",             # csv path
         last_df=None,            # videos df
@@ -76,7 +76,7 @@ def ensure_state():
         last_entities=[],        # list[str]
         last_period=("", ""),    # (start_iso, end_iso)
         sample_text="",          # LLM sample text
-        init_done=False,         # [추가] 초기 로딩 스피너 상태
+        init_done=False,         # 초기 로딩 스피너 상태
     )
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
@@ -84,16 +84,15 @@ ensure_state()
 
 # -------------------- 사이드바 (수정 없음) --------------------
 with st.sidebar:
-    # CSS를 주입하여 '새 채팅' 버튼을 상단에, '문의' 정보를 하단에 고정
     st.markdown("""
     <style>
         [data-testid="stSidebarUserContent"] {
             display: flex;
             flex-direction: column;
-            height: calc(100vh - 4rem); /* 전체 뷰포트 높이에서 상단 패딩 제외 */
+            height: calc(100vh - 4rem);
         }
         .contact-info {
-            margin-top: auto; /* 이 요소가 남은 공간을 모두 차지하여 맨 아래로 밀려남 */
+            margin-top: auto;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -547,90 +546,58 @@ def run_followup_turn(user_query: str):
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
     scroll_to_bottom()
 
-# -------------------- [UI수정] 메인 화면 --------------------
+# -------------------- 메인 화면 --------------------
 
-# [추가] 첫 로딩 시 스피너 표시
+# 첫 로딩 시 스피너 표시
 if not st.session_state.init_done:
-    # 화면 중앙에 스피너를 표시하기 위한 컨테이너
-    with st.container():
-        st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True) # 수직 중앙 정렬을 위한 공간
-        with st.spinner("로딩 중..."):
-            time.sleep(1.5) # 초기 로딩 시뮬레이션
+    with st.spinner("로딩 중..."):
+        time.sleep(1.5) # 초기 로딩 시뮬레이션
     st.session_state.init_done = True
     st.rerun()
 
-
 # 채팅 시작 여부에 따라 화면 분기
 if not st.session_state["chat"]:
-    # [수정] Gemini 스타일 초기 화면 (입력창 중앙, 주의사항 하단)
+    # [수정] 원래의 초기 화면으로 복원
     st.markdown("""
         <style>
-            /* 메인 콘텐츠 영역의 하단 패딩 제거 (초기화면 전용) */
-            .main .block-container {
-                padding-bottom: 0rem !important;
-            }
-            .welcome-title {
-                position: absolute;
-                top: 35%;
-                left: 50%;
-                transform: translate(-50%, -50%);
+            .welcome-container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
                 text-align: center;
-                width: 100%;
+                height: 70vh;
             }
-            .welcome-title h1 {
+            .welcome-container h1 {
                 font-size: 3.5rem;
                 font-weight: 600;
                 background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
             }
-            .welcome-title .subtitle {
+            .welcome-container .subtitle {
                 font-size: 1.2rem;
                 color: #4b5563;
-                margin-top: 0.5rem;
             }
-            /* 채팅 입력창을 화면 중앙으로 이동 */
-            [data-testid="stChatInputContainer"] {
-                position: fixed;
-                top: 50%;
-                transform: translateY(-50%);
-            }
-            .usage-notice-container {
-                position: absolute;
-                top: calc(50% + 80px); /* 입력창 아래에 위치하도록 조정 */
-                left: 50%;
-                transform: translateX(-50%);
-                width: 100%;
-                max-width: 740px; /* 박스 폭 넓게 */
-            }
-            .usage-notice-box {
+            .usage-notice {
+                margin-top: 3rem;
                 padding: 1rem 1.5rem;
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
                 background-color: #fafafa;
-                margin: 0 auto;
+                max-width: 600px;
             }
-            .usage-notice-box h4 {
+             .usage-notice h4 {
                 margin-bottom: 1rem;
                 font-weight: 600;
-            }
-            .usage-notice-box ol {
-                text-align: left;
-                padding-left: 20px;
-                font-size: 0.9rem; /* 글씨 크기 줄임 */
-                margin-bottom: 0;
-            }
+             }
         </style>
-        
-        <div class="welcome-title">
+        <div class="welcome-container">
             <h1>유튜브 댓글분석: AI 챗봇</h1>
             <p class="subtitle">기간과 분석주제를 명시하여 대화를 시작하세요</p>
-        </div>
-        
-        <div class="usage-notice-container">
-            <div class="usage-notice-box">
+            <div class="usage-notice">
                 <h4>⚠️ 사용 주의사항</h4>
-                <ol>
+                <ol style="text-align: left; padding-left: 20px;">
                     <li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li>
                     <li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li>
                 </ol>
@@ -642,22 +609,19 @@ else:
     render_metadata_outside_chat()
     render_chat()
 
-# 채팅 입력창 (항상 페이지 하단에 렌더링되지만, CSS에 의해 위치가 제어됨)
+# 채팅 입력창 (항상 페이지 하단에 위치)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
 if prompt:
     st.session_state["chat"].append({"role":"user","content":prompt})
     
-    # 첫 질문 입력 시, rerun을 통해 초기화면 요소를 지우고 채팅 화면으로 전환
-    if len(st.session_state["chat"]) == 1:
-        st.rerun()
-
     with st.chat_message("user"):
         st.markdown(prompt)
     
     scroll_to_bottom()
 
-    # 파이프라인 실행
-    if len(st.session_state.get("last_csv", "")) > 0:
+    # [수정] 파이프라인 실행 로직 (버그 수정)
+    # len(st.session_state.get("last_csv", "")) > 0 조건은 첫 질문 이후에만 참이 됨
+    if st.session_state.get("last_csv"):
         run_followup_turn(prompt)
     else:
         run_pipeline_first_turn(prompt)
