@@ -346,6 +346,7 @@ LIGHT_PROMPT = (
     "규칙:\n"
     "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
     "- **'키워드'는 검색에 사용할 가장 핵심적인 주제(프로그램, 브랜드 등) 1개로 한정한다.**\n"
+    "- **'키워드'에 드라마명과 인물명이 동시에 언급될 경우, 드라마명이 우선순위이**\n"
     "- **'엔티티/보조'는 키워드 검색 결과 내에서 분석의 초점이 될 인물, 세부 주제 등을 포함한다.**\n"
     "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
     "출력(6줄 고정):\n"
@@ -531,12 +532,26 @@ def run_pipeline_first_turn(user_query: str):
     prog_bar.progress(0.90, text="AI 분석중…")
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
     st.session_state["sample_text"] = sample_text
-    sys = "너는 유튜브 댓글을 분석하는 어시스턴트다. 주어진 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, 긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라."
-    payload = f"[키워드]: {', '.join(kw_main)}\n[엔티티]: {', '.join(kw_ent)}\n[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n[댓글 샘플]:\n{sample_text}\n"
+
+    # [수정] AI의 역할과 지시사항 (sys 변수)
+    sys = (
+        "너는 유튜브 댓글을 분석하는 어시스턴트다. "
+        "먼저 [사용자 원본 질문]을 확인하여 분석의 핵심 관점(예: 특정 인물 중심, 긍/부정 반응 등)을 파악하라. "
+        "그 다음, 주어진 댓글 샘플을 바탕으로 해당 관점에 맞춰 핵심 포인트를 항목화하고, 긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라."
+    )
+    
+    # [수정] 분석할 데이터에 원본 질문 추가 (payload 변수)
+    payload = (
+        f"[사용자 원본 질문]: {user_query}\n\n"
+        f"[키워드]: {', '.join(kw_main)}\n"
+        f"[엔티티]: {', '.join(kw_ent)}\n"
+        f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
+        f"[댓글 샘플]:\n{sample_text}\n"
+    )
+    
     answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
     prog_bar.progress(1.0, text="완료"); time.sleep(0.5); prog_bar.empty()
     return tidy_answer(answer_md_raw)
-
 def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
     sample_text = st.session_state.get("sample_text", "")
