@@ -3,7 +3,13 @@
 
 import streamlit as st
 import pandas as pd
-import os, re, gc, time, json, base64, requests
+import os
+import re
+import gc
+import time
+import json
+import base64
+import requests
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
@@ -14,75 +20,81 @@ from googleapiclient.errors import HttpError
 import google.generativeai as genai
 from streamlit.components.v1 import html as st_html
 
-# -------------------- 페이지/전역 --------------------
-st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
+# ==============================================================================
+# 페이지/전역 설정
+# ==============================================================================
+st.set_page_config(
+    page_title="유튜브 댓글분석: 챗봇",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 st.markdown("""
 <style>
-/* Streamlit 메인 컨테이너 패딩 최소화 */
-.main .block-container {
-    padding-top: 2rem;
-    padding-right: 1rem;
-    padding-left: 1rem;
-    padding-bottom: 5rem;
-}
-[data-testid="stSidebarContent"] {
-    padding-top: 1.5rem;
-}
-header {visibility: hidden;}
-footer {visibility: hidden;}
-#MainMenu {visibility: hidden;}
+    /* Streamlit 메인 컨테이너 패딩 최소화 */
+    .main .block-container {
+        padding-top: 2rem;
+        padding-right: 1rem;
+        padding-left: 1rem;
+        padding-bottom: 5rem;
+    }
+    [data-testid="stSidebarContent"] {
+        padding-top: 1.5rem;
+    }
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    #MainMenu {visibility: hidden;}
 
-/* --- 사이드바 너비 고정 --- */
-[data-testid="stSidebar"] {
-    width: 350px !important;
-    min-width: 350px !important;
-    max-width: 350px !important;
-}
-[data-testid="stSidebar"] + div[class*="resizer"] {
-    display: none;
-}
-/* --- --- */
+    /* --- 사이드바 너비 고정 --- */
+    [data-testid="stSidebar"] {
+        width: 350px !important;
+        min-width: 350px !important;
+        max-width: 350px !important;
+    }
+    [data-testid="stSidebar"] + div[class*="resizer"] {
+        display: none;
+    }
+    /* --- --- */
 
-/* AI 답변 폰트 크기 조정 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
-    font-size: 0.8rem;
-}
-/* 다운로드 버튼을 텍스트 링크처럼 보이게 스타일링 */
-.stDownloadButton button {
-    background-color: transparent;
-    color: #1c83e1;
-    border: none;
-    padding: 0;
-    text-decoration: underline;
-    font-size: 10px;
-    font-weight: normal;
-}
-.stDownloadButton button:hover {
-    color: #0b5cab;
-}
-/* 세션 목록 버튼 스타일 */
-.session-list .stButton button {
-    font-size: 0.9rem;
-    text-align: left;
-    font-weight: normal;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    display: block;
-}
-/* 새 채팅 버튼 스타일 */
-.new-chat-btn button {
-    background-color: #0057E7;
-    color: #1967d2;
-    border: 1px solid #d2e3fc !important;
-}
-.new-chat-btn button:hover {
-    background-color: #d2e3fc;
-    color: #185abc;
-    border: 1px solid #c2d8f8 !important;
-}
+    /* AI 답변 폰트 크기 조정 */
+    [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
+    [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
+        font-size: 0.95rem;
+    }
+    /* 다운로드 버튼을 텍스트 링크처럼 보이게 스타일링 */
+    .stDownloadButton button {
+        background-color: transparent;
+        color: #1c83e1;
+        border: none;
+        padding: 0;
+        text-decoration: underline;
+        font-size: 14px;
+        font-weight: normal;
+    }
+    .stDownloadButton button:hover {
+        color: #0b5cab;
+    }
+    /* 세션 목록 버튼 스타일 */
+    .session-list .stButton button {
+        font-size: 0.9rem;
+        text-align: left;
+        font-weight: normal;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+    }
+    /* 새 채팅 버튼 스타일 */
+    .new-chat-btn button {
+        background-color: #e8f0fe;
+        color: #1967d2;
+        border: 1px solid #d2e3fc !important;
+    }
+    .new-chat-btn button:hover {
+        background-color: #d2e3fc;
+        color: #185abc;
+        border: 1px solid #c2d8f8 !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -104,7 +116,9 @@ def kst_to_rfc3339_utc(dt_kst: datetime) -> str:
     if dt_kst.tzinfo is None: dt_kst = dt_kst.replace(tzinfo=KST)
     return dt_kst.astimezone(timezone.utc).isoformat().replace("+00:00","Z")
 
-# -------------------- 키/상수 --------------------
+# ==============================================================================
+# 키/상수
+# ==============================================================================
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
@@ -114,25 +128,46 @@ GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
 MAX_COMMENTS_PER_VID = 4_000
 
-# -------------------- 상태 --------------------
+# ==============================================================================
+# 세션 상태 관리
+# ==============================================================================
 def ensure_state():
-    defaults = {"chat":[], "last_schema":None, "last_csv":"", "last_df":None, "sample_text":"", "loaded_session_name": None}
+    defaults = {
+        "chat": [],
+        "last_schema": None,
+        "last_csv": "",
+        "last_df": None,
+        "sample_text": "",
+        "loaded_session_name": None
+    }
     for k, v in defaults.items():
-        if k not in st.session_state: st.session_state[k] = v
+        if k not in st.session_state:
+            st.session_state[k] = v
 ensure_state()
 
-# --- GitHub API 함수 ---
+# ==============================================================================
+# GitHub API 함수
+# ==============================================================================
 def _gh_headers(token: str):
     return {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
 
 def github_upload_file(repo, branch, path_in_repo, local_path, token):
     url = f"https://api.github.com/repos/{repo}/contents/{path_in_repo}"
-    with open(local_path, "rb") as f: content = base64.b64encode(f.read()).decode()
+    with open(local_path, "rb") as f:
+        content = base64.b64encode(f.read()).decode()
+
     headers = _gh_headers(token)
     get_resp = requests.get(url + f"?ref={branch}", headers=headers)
     sha = get_resp.json().get("sha") if get_resp.ok else None
-    data = {"message": f"archive: {os.path.basename(path_in_repo)}", "content": content, "branch": branch}
-    if sha: data["sha"] = sha
+
+    data = {
+        "message": f"archive: {os.path.basename(path_in_repo)}",
+        "content": content,
+        "branch": branch
+    }
+    if sha:
+        data["sha"] = sha
+
     resp = requests.put(url, headers=headers, json=data)
     resp.raise_for_status()
     return resp.json()
@@ -140,14 +175,17 @@ def github_upload_file(repo, branch, path_in_repo, local_path, token):
 def github_list_dir(repo, branch, folder, token):
     url = f"https://api.github.com/repos/{repo}/contents/{folder}?ref={branch}"
     resp = requests.get(url, headers=_gh_headers(token))
-    return [item['name'] for item in resp.json() if item['type'] == 'dir'] if resp.ok else []
+    if resp.ok:
+        return [item['name'] for item in resp.json() if item['type'] == 'dir']
+    return []
 
 def github_download_file(repo, branch, path_in_repo, token, local_path):
     url = f"https://api.github.com/repos/{repo}/contents/{path_in_repo}?ref={branch}"
     resp = requests.get(url, headers=_gh_headers(token))
     if resp.ok:
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        with open(local_path, "wb") as f: f.write(base64.b64decode(resp.json()["content"]))
+        with open(local_path, "wb") as f:
+            f.write(base64.b64decode(resp.json()["content"]))
         return True
     return False
 
@@ -156,6 +194,7 @@ def github_delete_folder(repo, branch, folder_path, token):
     headers = _gh_headers(token)
     resp = requests.get(contents_url, headers=headers)
     if not resp.ok: return
+
     for item in resp.json():
         delete_url = f"https://api.github.com/repos/{repo}/contents/{item['path']}"
         data = {"message": f"delete: {item['name']}", "sha": item['sha'], "branch": branch}
@@ -163,74 +202,60 @@ def github_delete_folder(repo, branch, folder_path, token):
 
 def github_rename_session(old_name, new_name, token):
     contents_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/sessions/{old_name}?ref={GITHUB_BRANCH}"
-    resp = requests.get(contents_url, headers=_gh_headers(token)); resp.raise_for_status()
+    resp = requests.get(contents_url, headers=_gh_headers(token))
+    resp.raise_for_status()
     files_to_move = resp.json()
+
     for item in files_to_move:
         filename = item['name']
         local_path = os.path.join(SESS_DIR, filename)
         if not github_download_file(GITHUB_REPO, GITHUB_BRANCH, item['path'], token, local_path):
             raise Exception(f"Failed to download {filename} from {old_name}")
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{new_name}/{filename}", local_path, token)
+    
     github_delete_folder(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{old_name}", token)
 
-# --- 세션 관리 함수 ---
+# ==============================================================================
+# 세션 관리 함수
+# ==============================================================================
 def _build_session_name() -> str:
-    # 덮어쓰기 로직: 이미 불러온 세션이 있다면 그 이름을 그대로 사용
     if st.session_state.get("loaded_session_name"):
         return st.session_state.loaded_session_name
 
-    # 1. 현재 분석의 핵심 키워드를 가져옴
     schema = st.session_state.get("last_schema", {})
     kw = (schema.get("keywords", ["NoKeyword"]))[0]
     kw_slug = re.sub(r'[^\w-]', '', kw.replace(' ', '_'))[:20]
-
-    # 2. GitHub에서 현재 키워드로 시작하는 모든 세션 목록을 가져옴
-    if GITHUB_TOKEN and GITHUB_REPO:
-        try:
-            all_sessions = github_list_dir(GITHUB_REPO, GITHUB_BRANCH, "sessions", GITHUB_TOKEN)
-            
-            # 3. 현재 키워드와 일치하는 세션들만 필터링
-            keyword_sessions = [s for s in all_sessions if s.startswith(f"{kw_slug}_")]
-
-            # 4. 필터링된 세션 이름에서 숫자 부분을 추출하여 가장 큰 숫자를 찾음
-            max_num = 0
-            for sess_name in keyword_sessions:
-                try:
-                    num_part = sess_name.rsplit('_', 1)[-1]
-                    if num_part.isdigit():
-                        max_num = max(max_num, int(num_part))
-                except (IndexError, ValueError):
-                    continue # 숫자 형식이 아닌 경우 무시
-
-            # 5. 새 세션 이름 생성 (가장 큰 숫자 + 1)
-            new_num = max_num + 1
-            return f"{kw_slug}_{new_num}"
-
-        except Exception:
-            # GitHub API 호출 실패 시, 기존 시간 기반 이름으로 대체
-            return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
-    else:
-        # GitHub 설정이 없을 경우, 기존 시간 기반 이름 사용
-        return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
+    return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
 
 def save_current_session_to_github():
     if not all([GITHUB_REPO, GITHUB_TOKEN, st.session_state.chat, st.session_state.last_csv]):
         return False, "저장할 데이터가 없거나 GitHub 설정이 누락되었습니다."
+    
     sess_name = _build_session_name()
-    local_dir = os.path.join(SESS_DIR, sess_name); os.makedirs(local_dir, exist_ok=True)
+    local_dir = os.path.join(SESS_DIR, sess_name)
+    os.makedirs(local_dir, exist_ok=True)
+
     try:
         meta_path = os.path.join(local_dir, "qa.json")
         meta_data = {"chat": st.session_state.chat, "last_schema": st.session_state.last_schema, "sample_text": st.session_state.sample_text}
-        with open(meta_path, "w", encoding="utf-8") as f: json.dump(meta_data, f, ensure_ascii=False, indent=2)
-        comments_path, videos_path = os.path.join(local_dir, "comments.csv"), os.path.join(local_dir, "videos.csv")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta_data, f, ensure_ascii=False, indent=2)
+
+        comments_path = os.path.join(local_dir, "comments.csv")
+        videos_path = os.path.join(local_dir, "videos.csv")
         os.system(f'cp "{st.session_state.last_csv}" "{comments_path}"')
-        if st.session_state.last_df is not None: st.session_state.last_df.to_csv(videos_path, index=False, encoding="utf-8-sig")
+        if st.session_state.last_df is not None:
+            st.session_state.last_df.to_csv(videos_path, index=False, encoding="utf-8-sig")
+
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", meta_path, GITHUB_TOKEN)
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", comments_path, GITHUB_TOKEN)
-        if os.path.exists(videos_path): github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", videos_path, GITHUB_TOKEN)
+        if os.path.exists(videos_path):
+            github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", videos_path, GITHUB_TOKEN)
+        
         st.session_state.loaded_session_name = sess_name
         return True, sess_name
-    except Exception as e: return False, f"저장 실패: {e}"
+    except Exception as e:
+        return False, f"저장 실패: {e}"
 
 def load_session_from_github(sess_name: str):
     with st.spinner(f"세션 '{sess_name}' 불러오는 중..."):
@@ -239,52 +264,87 @@ def load_session_from_github(sess_name: str):
             qa_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", GITHUB_TOKEN, os.path.join(local_dir, "qa.json"))
             comments_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", GITHUB_TOKEN, os.path.join(local_dir, "comments.csv"))
             videos_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", GITHUB_TOKEN, os.path.join(local_dir, "videos.csv"))
-            if not (qa_ok and comments_ok): st.error("세션 핵심 파일을 불러오는 데 실패했습니다."); return
-            st.session_state.clear(); ensure_state()
-            with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f: meta = json.load(f)
+
+            if not (qa_ok and comments_ok):
+                st.error("세션 핵심 파일을 불러오는 데 실패했습니다.")
+                return
+
+            st.session_state.clear()
+            ensure_state()
+            
+            with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            
             st.session_state.update({
-                "chat": meta.get("chat", []), "last_schema": meta.get("last_schema", None),
+                "chat": meta.get("chat", []),
+                "last_schema": meta.get("last_schema", None),
                 "last_csv": os.path.join(local_dir, "comments.csv"),
                 "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
-                "loaded_session_name": sess_name, "sample_text": meta.get("sample_text", "")
+                "loaded_session_name": sess_name,
+                "sample_text": meta.get("sample_text", "")
             })
-        except Exception as e: st.error(f"세션 로드 실패: {e}")
+        except Exception as e:
+            st.error(f"세션 로드 실패: {e}")
 
-if 'session_to_load' in st.session_state: load_session_from_github(st.session_state.pop('session_to_load')); st.rerun()
+if 'session_to_load' in st.session_state:
+    load_session_from_github(st.session_state.pop('session_to_load'))
+    st.rerun()
+
 if 'session_to_delete' in st.session_state:
     sess_name = st.session_state.pop('session_to_delete')
-    with st.spinner(f"세션 '{sess_name}' 삭제 중..."): github_delete_folder(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}", GITHUB_TOKEN)
-    st.success(f"세션 삭제 완료."); time.sleep(1); st.rerun()
+    with st.spinner(f"세션 '{sess_name}' 삭제 중..."):
+        github_delete_folder(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}", GITHUB_TOKEN)
+    st.success(f"세션 삭제 완료.")
+    time.sleep(1)
+    st.rerun()
+
 if 'session_to_rename' in st.session_state:
     old, new = st.session_state.pop('session_to_rename')
     if old and new and old != new:
         with st.spinner(f"이름 변경 중..."):
-            try: github_rename_session(old, new, GITHUB_TOKEN); st.success("이름 변경 완료!")
-            except Exception as e: st.error(f"변경 실패: {e}")
-        time.sleep(1); st.rerun()
+            try:
+                github_rename_session(old, new, GITHUB_TOKEN)
+                st.success("이름 변경 완료!")
+            except Exception as e:
+                st.error(f"변경 실패: {e}")
+        time.sleep(1)
+        st.rerun()
 
-# -------------------- 사이드바 --------------------
+# -------------------- 사이드바 UI --------------------
 with st.sidebar:
     st.markdown(f'<h2 style="font-weight: 600; font-size: 1.6rem; margin-bottom: 1.5rem; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">💬 유튜브 댓글분석: AI 챗봇</h2>', unsafe_allow_html=True)
     st.caption("문의: 미디어)디지털마케팅 데이터파트")
     st.markdown("""<style>[data-testid="stSidebarUserContent"] { display: flex; flex-direction: column; height: calc(100vh - 4rem); } .sidebar-top-section { flex-grow: 1; overflow-y: auto; } .sidebar-bottom-section { flex-shrink: 0; }</style>""", unsafe_allow_html=True)
+    
     st.markdown('<div class="sidebar-top-section">', unsafe_allow_html=True)
     
     st.markdown('<div class="new-chat-btn">', unsafe_allow_html=True)
-    if st.button("✨ 새 채팅", use_container_width=True): st.session_state.clear(); st.rerun()
+    if st.button("✨ 새 채팅", use_container_width=True):
+        st.session_state.clear()
+        st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 
     if st.session_state.chat and st.session_state.last_csv:
         if st.button("💾 현재 대화 저장", use_container_width=True):
-            with st.spinner("세션 저장 중..."): success, result = save_current_session_to_github()
-            if success: st.success(f"'{result}' 저장 완료!"); time.sleep(2); st.rerun()
-            else: st.error(result)
-    st.markdown("---"); st.markdown("#### 대화 기록")
-    if not all([GITHUB_TOKEN, GITHUB_REPO]): st.caption("GitHub 설정이 Secrets에 없습니다.")
+            with st.spinner("세션 저장 중..."):
+                success, result = save_current_session_to_github()
+            if success:
+                st.success(f"'{result}' 저장 완료!")
+                time.sleep(2)
+                st.rerun()
+            else:
+                st.error(result)
+
+    st.markdown("---")
+    st.markdown("#### 대화 기록")
+
+    if not all([GITHUB_TOKEN, GITHUB_REPO]):
+        st.caption("GitHub 설정이 Secrets에 없습니다.")
     else:
         try:
             sessions = sorted(github_list_dir(GITHUB_REPO, GITHUB_BRANCH, "sessions", GITHUB_TOKEN), reverse=True)
-            if not sessions: st.caption("저장된 기록이 없습니다.")
+            if not sessions:
+                st.caption("저장된 기록이 없습니다.")
             else:
                 editing_session = st.session_state.get("editing_session", None)
                 st.markdown('<div class="session-list">', unsafe_allow_html=True)
@@ -292,47 +352,89 @@ with st.sidebar:
                     if sess == editing_session:
                         new_name = st.text_input("새 이름:", value=sess, key=f"new_name_{sess}")
                         c1, c2 = st.columns(2)
-                        if c1.button("✅", key=f"save_{sess}"): st.session_state.session_to_rename = (sess, new_name); st.session_state.pop('editing_session', None); st.rerun()
-                        if c2.button("❌", key=f"cancel_{sess}"): st.session_state.pop('editing_session', None); st.rerun()
+                        if c1.button("✅", key=f"save_{sess}"):
+                            st.session_state.session_to_rename = (sess, new_name)
+                            st.session_state.pop('editing_session', None)
+                            st.rerun()
+                        if c2.button("❌", key=f"cancel_{sess}"):
+                            st.session_state.pop('editing_session', None)
+                            st.rerun()
                     else:
                         c1, c2, c3 = st.columns([0.7, 0.15, 0.15])
-                        if c1.button(sess, key=f"sess_{sess}", use_container_width=True): st.session_state.session_to_load = sess; st.rerun()
-                        if c2.button("✏️", key=f"edit_{sess}"): st.session_state.editing_session = sess; st.rerun()
-                        if c3.button("🗑️", key=f"del_{sess}"): st.session_state.session_to_delete = sess; st.rerun()
+                        if c1.button(sess, key=f"sess_{sess}", use_container_width=True):
+                            st.session_state.session_to_load = sess
+                            st.rerun()
+                        if c2.button("✏️", key=f"edit_{sess}"):
+                            st.session_state.editing_session = sess
+                            st.rerun()
+                        if c3.button("🗑️", key=f"del_{sess}"):
+                            st.session_state.session_to_delete = sess
+                            st.rerun()
                 st.markdown('</div>', unsafe_allow_html=True)
-        except Exception as e: st.error("기록 로딩 실패")
+        except Exception as e:
+            st.error("기록 로딩 실패")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    st.markdown('<div class="sidebar-bottom-section">', unsafe_allow_html=True)
+    st.markdown("""<hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트</p>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
+# ==============================================================================
+# 로직 (핵심 함수 정의)
+# ==============================================================================
+def scroll_to_bottom():
+    st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
-# -------------------- 로직 (이하 복원) --------------------
-def scroll_to_bottom(): st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 def render_metadata_and_downloads():
-    if not (schema := st.session_state.get("last_schema")): return
+    if not (schema := st.session_state.get("last_schema")):
+        return
+    
     kw_main, (start_iso, end_iso) = schema.get("keywords", []), (schema.get('start_iso', ''), schema.get('end_iso', ''))
-    try: start_dt_str, end_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M'), datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
-    except (ValueError, TypeError): start_dt_str, end_dt_str = (start_iso.split('T')[0] if start_iso else ""), (end_iso.split('T')[0] if end_iso else "")
+    try:
+        start_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
+        end_dt_str = datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
+    except (ValueError, TypeError):
+        start_dt_str = start_iso.split('T')[0] if start_iso else ""
+        end_dt_str = end_iso.split('T')[0] if end_iso else ""
+        
     with st.container(border=True):
         st.markdown(f"""<div style="font-size:14px; color:#4b5563; line-height: 1.8;"><span style='font-weight:600;'>키워드:</span> {', '.join(kw_main) if kw_main else '(없음)'}<br><span style='font-weight:600;'>기간:</span> {start_dt_str} ~ {end_dt_str} (KST)</div>""", unsafe_allow_html=True)
+        
         csv_path, df_videos = st.session_state.get("last_csv"), st.session_state.get("last_df")
         if csv_path and os.path.exists(csv_path) and df_videos is not None and not df_videos.empty:
-            with open(csv_path, "rb") as f: comment_csv_data = f.read()
-            buffer = io.BytesIO(); df_videos.to_csv(buffer, index=False, encoding="utf-8-sig"); video_csv_data = buffer.getvalue()
-            keywords_str = "_".join(kw_main).replace(" ", "_") if kw_main else "data"; now_str = now_kst().strftime('%Y%m%d')
+            with open(csv_path, "rb") as f:
+                comment_csv_data = f.read()
+            
+            buffer = io.BytesIO()
+            df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
+            video_csv_data = buffer.getvalue()
+            
+            keywords_str = "_".join(kw_main).replace(" ", "_") if kw_main else "data"
+            now_str = now_kst().strftime('%Y%m%d')
+            
             col1, col2, col3, _ = st.columns([1.1, 1.2, 1.2, 6.5])
             col1.markdown("<div style='font-size:14px; color:#4b5563; font-weight:600; padding-top: 5px;'>다운로드:</div>", unsafe_allow_html=True)
-            with col2: st.download_button("전체댓글", comment_csv_data, f"comments_{keywords_str}_{now_str}.csv", "text/csv")
-            with col3: st.download_button("영상목록", video_csv_data, f"videos_{keywords_str}_{now_str}.csv", "text/csv")
+            with col2:
+                st.download_button("전체댓글", comment_csv_data, f"comments_{keywords_str}_{now_str}.csv", "text/csv")
+            with col3:
+                st.download_button("영상목록", video_csv_data, f"videos_{keywords_str}_{now_str}.csv", "text/csv")
+
 def render_chat():
     for msg in st.session_state.chat:
-        with st.chat_message(msg["role"]): st.markdown(msg["content"])
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
 class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
-        self.keys, self.state_key, self.on_rotate = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10], state_key, on_rotate
+        self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
+        self.state_key = state_key
+        self.on_rotate  = on_rotate
         idx = st.session_state.get(state_key, 0)
         self.idx = 0 if not self.keys else (idx % len(self.keys))
         st.session_state[state_key] = self.idx
-    def current(self): return self.keys[self.idx % len(self.keys)] if self.keys else None
+    def current(self):
+        return self.keys[self.idx % len(self.keys)] if self.keys else None
     def rotate(self):
         if not self.keys: return
         self.idx = (self.idx + 1) % len(self.keys)
@@ -341,38 +443,51 @@ class RotatingKeys:
 
 class RotatingYouTube:
     def __init__(self, keys, state_key="yt_key_idx"):
-        self.rot, self.service = RotatingKeys(keys, state_key), None
+        self.rot = RotatingKeys(keys, state_key)
+        self.service = None
         self._build()
     def _build(self):
-        if not (key := self.rot.current()): raise RuntimeError("YouTube API Key가 비어 있습니다.")
+        key = self.rot.current()
+        if not key: raise RuntimeError("YouTube API Key가 비어 있습니다.")
         self.service = build("youtube", "v3", developerKey=key)
     def execute(self, factory):
-        try: return factory(self.service).execute()
+        try:
+            return factory(self.service).execute()
         except HttpError as e:
-            status, msg = getattr(getattr(e, 'resp', None), 'status', None), (getattr(e, 'content', b'').decode('utf-8', 'ignore') or '').lower()
+            status = getattr(getattr(e, 'resp', None), 'status', None)
+            msg = (getattr(e, 'content', b'').decode('utf-8', 'ignore') or '').lower()
             if status in (403, 429) and any(t in msg for t in ["quota", "rate", "limit"]) and len(YT_API_KEYS) > 1:
-                self.rot.rotate(); self._build()
+                self.rot.rotate()
+                self._build()
                 return factory(self.service).execute()
             raise
 
 LIGHT_PROMPT = (f"역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n규칙:\n- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n- '키워드'는 검색에 사용할 가장 핵심적인 주제(프로그램, 브랜드 등) 1개로 한정한다.\n- '엔티티/보조'는 키워드 검색 결과 내에서 분석의 초점이 될 인물, 세부 주제 등을 포함한다.\n- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n출력(6줄 고정):\n- 한 줄 요약: <문장>\n- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n- 키워드: [<핵심 키워드 1개>]\n- 엔티티/보조: [<인물>, <세부 주제 등>]\n- 옵션: {{ include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }}\n- 원문: {{USER_QUERY}}\n\n현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}")
+
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
-    if not rk.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
+    if not rk.current():
+        raise RuntimeError("Gemini API Key가 비어 있습니다.")
+    
     for _ in range(len(rk.keys) or 1):
         try:
             genai.configure(api_key=rk.current())
             model = genai.GenerativeModel(model_name, generation_config={"temperature": 0.2, "max_output_tokens": max_tokens})
             resp = model.generate_content([system_instruction, user_payload], request_options={"timeout": timeout_s})
-            if out := getattr(resp, "text", None): return out
+            if out := getattr(resp, "text", None):
+                return out
             if c0 := (getattr(resp, "candidates", None) or [None])[0]:
                 if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
-                    if hasattr(p0, "text"): return p0.text
+                    if hasattr(p0, "text"):
+                        return p0.text
             return ""
         except Exception as e:
-            if "429" in str(e).lower() and len(rk.keys) > 1: rk.rotate(); continue
+            if "429" in str(e).lower() and len(rk.keys) > 1:
+                rk.rotate()
+                continue
             raise
     return ""
+
 def parse_light_block_to_schema(light_text: str) -> dict:
     raw = (light_text or "").strip()
     m_time = re.search(r"기간\(KST\)\s*:\s*([^~]+)~\s*([^\n]+)", raw)
@@ -391,8 +506,10 @@ def parse_light_block_to_schema(light_text: str) -> dict:
     if not (start_iso and end_iso):
         end_dt, start_dt = now_kst(), now_kst() - timedelta(hours=24)
         start_iso, end_iso = to_iso_kst(start_dt), to_iso_kst(end_dt)
-    if not keywords: keywords = [m[0]] if (m := re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)) else ["유튜브"]
+    if not keywords:
+        keywords = [m[0]] if (m := re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)) else ["유튜브"]
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
+
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
     while len(video_ids) < max_results:
@@ -405,6 +522,7 @@ def yt_search_videos(rt, keyword, max_results, order="relevance", published_afte
         if not (token := resp.get("nextPageToken")): break
         time.sleep(0.25)
     return video_ids
+
 def yt_video_statistics(rt, video_ids):
     rows = []
     for i in range(0, len(video_ids), 50):
@@ -420,6 +538,7 @@ def yt_video_statistics(rt, video_ids):
             rows.append({"video_id": vid_id, "video_url": f"https://www.youtube.com/watch?v={vid_id}", "title": snip.get("title", ""), "channelTitle": snip.get("channelTitle", ""), "publishedAt": snip.get("publishedAt", ""), "duration": dur, "shortType": "Shorts" if dur_sec <= 60 else "Clip", "viewCount": int(stats.get("viewCount", 0) or 0), "likeCount": int(stats.get("likeCount", 0) or 0), "commentCount": int(stats.get("commentCount", 0) or 0)})
         time.sleep(0.25)
     return rows
+
 def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None):
     replies, token = [], None
     while not (cap is not None and len(replies) >= cap):
@@ -431,6 +550,7 @@ def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=Non
         if not (token := resp.get("nextPageToken")): break
         time.sleep(0.2)
     return replies[:cap] if cap is not None else replies
+
 def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_replies=True, max_per_video=None):
     rows, token = [], None
     while not (max_per_video is not None and len(rows) >= max_per_video):
@@ -446,6 +566,7 @@ def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_repl
         if not (token := resp.get("nextPageToken")): break
         time.sleep(0.2)
     return rows[:max_per_video] if max_per_video is not None else rows
+
 def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar):
     out_csv = os.path.join(BASE_DIR, f"collect_{uuid4().hex}.csv")
     wrote_header, total_written, done, total_videos = False, 0, 0, len(video_list)
@@ -462,6 +583,7 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
             prog_bar.progress(min(0.90, 0.50 + (done / total_videos) * 0.40 if total_videos > 0 else 0.50), text="댓글 수집중…")
             if total_written >= max_total_comments: break
     return out_csv, total_written
+
 def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000):
     if not os.path.exists(csv_path): return "", 0, 0
     try: df_all = pd.read_csv(csv_path)
@@ -478,7 +600,9 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=28
         if total_chars + len(line) + 1 > max_total_chars: break
         lines.append(line); total_chars += len(line) + 1
     return "\n".join(lines), len(lines), total_chars
+
 TITLE_LINE_RE, HEADER_DUP_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$"), re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
+
 def tidy_answer(md: str) -> str:
     if not md: return md
     lines = [line for line in md.splitlines() if not (TITLE_LINE_RE.match(line) or HEADER_DUP_RE.search(line))]
@@ -488,6 +612,7 @@ def tidy_answer(md: str) -> str:
         if is_blank and prev_blank: continue
         cleaned.append(l); prev_blank = is_blank
     return "\n".join(cleaned).strip()
+
 def run_pipeline_first_turn(user_query: str):
     prog_bar = st.progress(0, text="준비 중…")
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
@@ -520,40 +645,38 @@ def run_pipeline_first_turn(user_query: str):
     prog_bar.progress(1.0, text="완료"); time.sleep(0.5); prog_bar.empty()
     return tidy_answer(answer_md_raw)
 
-
 def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
-    
     sample_text = st.session_state.get("sample_text", "")
     context = "\n".join(f"[이전 {'Q' if m['role'] == 'user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
-    
-    # [수정] 챗봇의 대화 흐름을 강조하는 프롬프트
-    sys = (
-        "너는 사용자의 질문 의도를 정확히 파악하여 핵심만 답변하는 유튜브 댓글 분석 챗봇이다.\n"
-        "--- 중요 규칙 ---\n"
-        "1. **질문 의도 파악이 최우선**: 사용자의 마지막 질문이 **'무엇(What)/어떻게(How)'**에 대한 내용(정성)을 묻는지, **'몇 개/비율(How many)'**에 대한 수치(정량)를 묻는지 먼저 명확히 구분하라.\n\n"
-        "2. **'내용(정성)'을 물었을 때**: '연기력 어때?', '어떤 내용이야?' 와 같은 질문에는 **절대 숫자로만 답하지 마라.** 반드시 `[댓글 샘플]`에서 관련된 실제 댓글 내용을 찾아 **핵심 반응을 요약**하고, **주요 댓글을 1~3개 인용하여 근거로 제시**해야 한다.\n\n"
-        "3. **'수치(정량)'를 물었을 때**: '몇 개야?', '비중이 어때?' 와 같은 질문에는 `[댓글 샘플]` 내에서 키워드 언급 횟수를 직접 세어 **'약 O회 언급됩니다' 또는 'A가 B보다 더 많이 언급됩니다'** 와 같이 숫자를 중심으로 간결하게 답변하라.\n\n"
-        "4. **동문서답 절대 금지**: 만약 직전 답변에서 '언급 횟수는 10회입니다'라고 이미 답했다면, 사용자가 다시 '내용이 어때?'라고 물었을 때 **절대 '10회 언급됩니다'라고 반복하지 마라.** 사용자는 이제 그 10개의 '내용'을 궁금해하는 것이다.\n\n"
-        "5. **언급 금지**: 답변 시 '댓글 샘플'이라는 단어를 직접적으로 언급하지 마라."
-        
-    )
-
+    sys = ("너는 사용자의 질문 의도를 정확히 파악하여 핵심만 답변하는 유튜브 댓글 분석 챗봇이다.\n"
+           "--- 중요 규칙 ---\n"
+           "1. **질문 의도 파악이 최우선**: 사용자의 마지막 질문이 **'무엇(What)/어떻게(How)'**에 대한 내용(정성)을 묻는지, **'몇 개/비율(How many)'**에 대한 수치(정량)를 묻는지 먼저 명확히 구분하라.\n\n"
+           "2. **'내용(정성)'을 물었을 때**: '연기력 어때?', '어떤 내용이야?' 와 같은 질문에는 **절대 숫자로만 답하지 마라.** 반드시 `[댓글 샘플]`에서 관련된 실제 댓글 내용을 찾아 **핵심 반응을 요약**하고, **주요 댓글을 1~3개 인용하여 근거로 제시**해야 한다.\n\n"
+           "3. **'수치(정량)'를 물었을 때**: '몇 개야?', '비중이 어때?' 와 같은 질문에는 `[댓글 샘플]` 내에서 키워드 언급 횟수를 직접 세어 **'약 O회 언급됩니다' 또는 'A가 B보다 더 많이 언급됩니다'** 와 같이 숫자를 중심으로 간결하게 답변하라.\n\n"
+           "4. **동문서답 절대 금지**: 만약 직전 답변에서 '언급 횟수는 10회입니다'라고 이미 답했다면, 사용자가 다시 '내용이 어때?'라고 물었을 때 **절대 '10회 언급됩니다'라고 반복하지 마라.** 사용자는 이제 그 10개의 '내용'을 궁금해하는 것이다.\n\n"
+           "5. **언급 금지**: 답변 시 '댓글 샘플'이라는 단어를 직접적으로 언급하지 마라.")
     payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n[댓글 샘플]:\n{sample_text}\n"
-    
-    with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-        response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
-        
+    with st.spinner("💬 AI가 답변을 구성 중입니다..."): response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
     return response
 
 # -------------------- 메인 화면 및 실행 로직 --------------------
 if not st.session_state.chat:
     st.markdown("""<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;"><h1 style="font-size: 3.5rem; font-weight: 600; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">유튜브 댓글분석: AI 챗봇</h1><p style="font-size: 1.2rem; color: #4b5563;">드라마, 배우를 주제로 대화를 시작하세요</p><div style="margin-top: 3rem; padding: 1rem 1.5rem; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #fafafa; max-width: 600px;"><h4 style="margin-bottom: 1rem; font-weight: 600;">⚠️ 사용 주의사항</h4><ol style="text-align: left; padding-left: 20px;"><li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li><li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li><li>첫 질문에는 기간을 명시해주세요 (ex.최근 48시간 / 5월 1일부터).</li></ol></div></div>""", unsafe_allow_html=True)
 else:
-    render_metadata_and_downloads(); render_chat(); scroll_to_bottom()
+    render_metadata_and_downloads()
+    render_chat()
+    scroll_to_bottom()
+
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
-    st.session_state.chat.append({"role": "user", "content": prompt}); st.rerun()
+    st.session_state.chat.append({"role": "user", "content": prompt})
+    st.rerun()
+
 if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
     user_query = st.session_state.chat[-1]["content"]
-    response = run_pipeline_first_turn(user_query) if not st.session_state.get("last_csv") else run_followup_turn(user_query)
-    st.session_state.chat.append({"role": "assistant", "content": response}); st.rerun()
+    if not st.session_state.get("last_csv"):
+        response = run_pipeline_first_turn(user_query)
+    else:
+        response = run_followup_turn(user_query)
+    st.session_state.chat.append({"role": "assistant", "content": response})
+    st.rerun()
