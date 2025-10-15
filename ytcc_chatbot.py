@@ -502,7 +502,7 @@ def run_pipeline_first_turn(user_query: str):
     kw_main, kw_ent = schema.get("keywords", []), schema.get("entities", [])
     all_ids = []
     for base_kw in (kw_main or ["유튜브"]):
-        all_ids.extend(yt_search_videos(rt, base_kw, 60, "viewcount", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
+        all_ids.extend(yt_search_videos(rt, base_kw, 60, "viewCount", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
         for e in kw_ent: all_ids.extend(yt_search_videos(rt, f"{base_kw} {e}", 30, "relevance", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
     all_ids = list(dict.fromkeys(all_ids))
     prog_bar.progress(0.40, text="댓글 수집 준비중…")
