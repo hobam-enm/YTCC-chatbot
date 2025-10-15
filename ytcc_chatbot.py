@@ -114,6 +114,7 @@ with st.sidebar:
     if df_videos is not None and not df_videos.empty:
         try:
             # Pandas DataFrame을 CSV 문자열로 변환 (인코딩: utf-8-sig로 설정하여 엑셀에서 깨짐 방지)
+            # UTF-8 BOM(Byte Order Mark)을 추가하여 한글 깨짐 방지 (Excel 호환성 향상)
             video_csv_data = df_videos.to_csv(index=False, encoding="utf-8-sig").encode('utf-8')
             
             # 파일 이름 생성
