@@ -40,15 +40,15 @@ footer {visibility: hidden;}
 /* 채팅 메시지 기본 스타일 */
 [data-testid="stChatMessage"] {
     width: fit-content;
-    max-width: 90%; /* [수정] 너비 제한 확장 */
     margin-bottom: 1rem;
     padding: 0.8rem 1rem;
     border-radius: 18px;
     line-height: 1.5;
 }
 
-/* AI 답변 (assistant) 스타일 */
+/* AI 답변 (assistant) 스타일 - 너비 제한 없음 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
+    max-width: none; /* [수정] 너비 제한 제거 */
     background-color: #f0f2f6;
     border: 1px solid #d1d5db;
 }
@@ -65,6 +65,7 @@ footer {visibility: hidden;}
 
 /* 사용자 질문 (user) 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
+    max-width: 90%; /* 사용자 질문은 너비 제한 유지 */
     background-color: #0084ff;
     color: white;
     margin-left: auto;
@@ -142,7 +143,7 @@ with st.sidebar:
 
 # -------------------- 로직 (수정 없음) --------------------
 def scroll_to_bottom():
-    st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
+    st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView(); } </script>", height=0)
 
 def render_metadata_outside_chat():
     if not st.session_state.get("last_schema"): return
@@ -419,7 +420,6 @@ def run_followup_turn(user_query: str):
 
 # -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
 
-# 1. 뷰 렌더링: 이전 대화기록 표시
 if not st.session_state.chat:
     st.markdown("""
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
@@ -439,24 +439,27 @@ else:
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+    scroll_to_bottom()
 
-# 2. 신규 프롬프트 처리
+
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
     st.session_state.chat.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.rerun()
 
+if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
+    user_query = st.session_state.chat[-1]["content"]
+    
     with st.chat_message("assistant"):
         container = st.empty()
-        if not st.session_state.get("last_csv"): # 첫 질문
+        
+        if not st.session_state.get("last_csv"):
             progress_bar = container.progress(0, text="준비 중…")
-            response = run_pipeline_first_turn(prompt, progress_bar)
-            container.markdown(response)
-        else: # 후속 질문
+            response = run_pipeline_first_turn(user_query, progress_bar)
+        else:
             with container.spinner("💬 AI가 답변을 구성 중입니다..."):
-                response = run_followup_turn(prompt)
-            container.markdown(response)
+                response = run_followup_turn(user_query)
+        
+        container.markdown(response)
 
     st.session_state.chat.append({"role": "assistant", "content": response})
-    time.sleep(0.1)
-    scroll_to_bottom()
+    st.rerun()
