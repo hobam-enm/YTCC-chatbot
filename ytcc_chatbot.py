@@ -128,6 +128,7 @@ def scroll_to_bottom():
     st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
 # [수정] 다운로드 기능을 포함하도록 함수 확장
+# [수정] 다운로드 기능을 포함하도록 함수 확장
 def render_metadata_and_downloads():
     if not st.session_state.get("last_schema"):
         return
@@ -142,45 +143,71 @@ def render_metadata_and_downloads():
         start_dt_str = start_iso.split('T')[0] if start_iso else ""
         end_dt_str = end_iso.split('T')[0] if end_iso else ""
 
-    # 분석 컨텍스트와 다운로드를 하나의 박스 안에 넣음
+    # [수정] 다운로드 버튼 스타일을 더 정교하게 제어
+    st.markdown("""
+    <style>
+        .stDownloadButton > button {
+            background-color: transparent !important;
+            color: #1c83e1 !important; /* Streamlit 기본 링크 색상 */
+            border: none !important;
+            padding: 0 !important;
+            font-size: 14px !important;
+            font-weight: normal !important; /* 일반 텍스트 굵기 */
+            text-decoration: underline;
+            margin: 0;
+            line-height: 1.8; /* 주변 텍스트와 줄 간격 맞춤 */
+        }
+        .stDownloadButton > button:hover {
+            text-decoration: underline;
+            color: #0b5cab !important;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     with st.container(border=True):
-        # 1. 분석 컨텍스트 정보 (제목 제거)
-        st.markdown(
-            f"""
-            <div style="font-size:14px; color:#4b5563; line-height: 1.8;">
-                <span style='font-weight:600;'>키워드:</span> {', '.join(kw_main) if kw_main else '(없음)'}<br>
-                <span style='font-weight:600;'>기간:</span> {start_dt_str} ~ {end_dt_str} (KST)
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        # 레이아웃을 위해 두 개의 컬럼 생성
+        col1, col2 = st.columns([0.13, 0.87])
+        
+        with col1:
+            st.markdown(
+                """
+                <div style="font-size:14px; color:#4b5563; line-height: 1.8; font-weight:600;">
+                키워드:<br>
+                기간:<br>
+                다운로드:
+                </div>
+                """, unsafe_allow_html=True
+            )
+        
+        with col2:
+            st.markdown(
+                f"""
+                <div style="font-size:14px; color:#4b5563; line-height: 1.8;">
+                {', '.join(kw_main) if kw_main else '(없음)'}<br>
+                {start_dt_str} ~ {end_dt_str} (KST)
+                </div>
+                """, unsafe_allow_html=True
+            )
+            
+            # 다운로드 버튼 표시 (데이터가 있을 경우)
+            csv_path = st.session_state.get("last_csv")
+            df_videos = st.session_state.get("last_df")
+            if csv_path and os.path.exists(csv_path) and df_videos is not None and not df_videos.empty:
+                with open(csv_path, "rb") as f:
+                    comment_csv_data = f.read()
 
-        # 2. 다운로드 링크 (데이터가 있을 경우)
-        csv_path = st.session_state.get("last_csv")
-        df_videos = st.session_state.get("last_df")
+                buffer = io.BytesIO()
+                df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
+                video_csv_data = buffer.getvalue()
 
-        if csv_path and os.path.exists(csv_path) and df_videos is not None and not df_videos.empty:
-            # 데이터 준비
-            with open(csv_path, "rb") as f:
-                comment_csv_data = f.read()
-
-            buffer = io.BytesIO()
-            df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
-            video_csv_data = buffer.getvalue()
-
-            keywords_str = "_".join(kw_main).replace(" ", "_") if kw_main else "data"
-            now_str = now_kst().strftime('%Y%m%d')
-            comment_file_name = f"comments_{keywords_str}_{now_str}.csv"
-            video_file_name = f"videos_{keywords_str}_{now_str}.csv"
-
-            # 레이아웃 구성 (구분선 제거)
-            col1, col2, col3, _ = st.columns([1.1, 1.2, 1.2, 6.5])
-            with col1:
-                st.markdown("<div style='font-size:14px; color:#4b5563; font-weight:600; padding-top: 5px;'>다운로드:</div>", unsafe_allow_html=True)
-            with col2:
-                st.download_button("전체댓글", comment_csv_data, comment_file_name, "text/csv")
-            with col3:
-                st.download_button("영상목록", video_csv_data, video_file_name, "text/csv")
+                keywords_str = "_".join(kw_main).replace(" ", "_") if kw_main else "data"
+                now_str = now_kst().strftime('%Y%m%d')
+                
+                btn_col1, btn_col2, _ = st.columns([0.2, 0.2, 0.6])
+                with btn_col1:
+                    st.download_button("전체댓글", comment_csv_data, f"comments_{keywords_str}_{now_str}.csv", "text/csv")
+                with btn_col2:
+                    st.download_button("영상목록", video_csv_data, f"videos_{keywords_str}_{now_str}.csv", "text/csv")
 
 def render_chat():
     for msg in st.session_state.chat:
