@@ -37,7 +37,7 @@ st.markdown("""
 }
 
 /* Custom CSS for Sleek Welcome Screen and Centered Input */
-/* Center and constrain the chat input at the bottom (요청: 중하단으로 올림 -> bottom: 2rem) */
+/* Center and constrain the chat input at the bottom (요청: 중하단으로 올림 -> bottom: 4rem) */
 [data-testid="stChatInputContainer"] {
     width: 100%;
     max-width: 900px; /* 질문창 폭 제한 */
@@ -45,7 +45,7 @@ st.markdown("""
     left: 50%;
     transform: translateX(-50%);
     position: fixed; 
-    bottom: 2rem; /* 중하단 위치로 조정 */
+    bottom: 4rem; /* **입력창 위치 조정: 4rem (중하단)** */
     z-index: 1000;
     /* Streamlit이 기본적으로 주는 input container padding을 줄여서 더 간결하게 */
     padding-bottom: 1rem; 
@@ -53,7 +53,7 @@ st.markdown("""
 }
 /* Ensure the chat history area leaves sufficient space for the centered fixed input */
 .stApp {
-    padding-bottom: 9rem; /* 입력창 높이 + 여백 확보 (7rem -> 9rem으로 증가) */
+    padding-bottom: 11rem; /* 입력창 높이 + 여백 확보 (9rem -> 11rem으로 증가) */
 }
 /* Center the initial welcome content vertically and horizontally */
 .centered-content {
@@ -71,6 +71,21 @@ st.markdown("""
     font-weight: 700;
     margin-bottom: 1rem;
     color: #374151; /* Darker text for prominence */
+}
+/* **사용법 박스 스타일 수정: 폰트 크기 축소, 너비 확장, 줄바꿈 제어** */
+.usage-box {
+    text-align:center; 
+    font-size:0.9rem; /* 1.0rem -> 0.9rem */
+    color:#1f2937; 
+    margin-top:40px; 
+    padding:12px 20px; 
+    border-radius:12px; 
+    background-color: #eef2ff; 
+    border: 1px solid #c7d2fe; 
+    max-width: 700px; /* 600px -> 700px */
+    margin-left: auto; 
+    margin-right: auto;
+    white-space: pre-wrap; /* 텍스트 내 줄바꿈은 유지하되, 강제 줄바꿈을 방지 */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -115,11 +130,6 @@ def ensure_state():
 ensure_state()
 
 with st.sidebar:
-    # 1. '유튜브 댓글분석 챗봇' 및 st.info로 표시되던 긴 설명 문구 삭제
-    # st.markdown("## 💬 유튜브 댓글 분석 챗봇") # 삭제
-    # st.info(...) # 삭제
-
-    # -------------------- CSV 다운로드 기능 추가 --------------------
     csv_path = st.session_state.get("last_csv")
     df_videos = st.session_state.get("last_df")
     download_section_shown = False
@@ -130,7 +140,6 @@ with st.sidebar:
             with open(csv_path, "rb") as f:
                 csv_data = f.read()
             
-            # 파일 이름 생성 (키워드 또는 기본값)
             keywords = st.session_state.get("last_keywords", ["data"])
             keywords_str = "_".join([k for k in keywords if k]).replace(" ", "_") or "data"
             file_name = f"youtube_comments_{keywords_str}_{now_kst().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -148,20 +157,18 @@ with st.sidebar:
         except Exception:
             st.warning("다운로드할 댓글 CSV 파일을 읽는 데 실패했습니다.")
 
-    # 2. 영상 데이터 다운로드 (수정: 한글 깨짐 방지용 utf-8-sig 인코딩 적용)
+    # 2. 영상 데이터 다운로드
     if df_videos is not None and not df_videos.empty:
         try:
-            # BytesIO를 사용하여 Pandas가 BOM을 포함한 UTF-8-SIG 바이트를 정확히 생성하도록 수정
             buffer = io.BytesIO()
             df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
             video_csv_data = buffer.getvalue()
             
-            # 파일 이름 생성
             keywords = st.session_state.get("last_keywords", ["data"])
             keywords_str = "_".join([k for k in keywords if k]).replace(" ", "_") or "data"
             video_file_name = f"youtube_videos_{keywords_str}_{now_kst().strftime('%Y%m%d_%H%M%S')}.csv"
 
-            if not download_section_shown: # 댓글 다운로드 섹션이 없었으면 구분선 추가
+            if not download_section_shown:
                  st.markdown("---") 
 
             st.download_button(
@@ -178,13 +185,13 @@ with st.sidebar:
             
     if download_section_shown:
         st.markdown("---")
-        
-    if st.button("🔄 초기화", type="secondary"):
+    
+    # **초기화 버튼 문구 및 스타일 변경**
+    if st.button("✨ 새 채팅 (데이터 초기화)", type="primary"):
         st.session_state.clear()
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
 
-    # 볼드 제거 반영
     st.markdown("---")
     st.markdown("### 📞 문의")
     st.markdown("미디어)디지털마케팅 데이터파트 김호범")
@@ -226,7 +233,7 @@ def render_metadata_outside_chat():
     st.markdown(metadata_html, unsafe_allow_html=True)
 
 
-# -------------------- 키 로테이터 / 유튜브 / LLM 호출 (생략 - 이전 버전과 동일) --------------------
+# -------------------- 키 로테이터 / 유튜브 / LLM 호출 (이하 생략) --------------------
 # ********************************************************************************************************************
 
 class RotatingKeys:
@@ -642,7 +649,7 @@ def run_followup_turn(user_query: str):
         f"[댓글 샘플]:\n{sample_text}\n" # 캐시된 텍스트 사용
     )
 
-    # 요청하신 대로 st.progress 대신 st.spinner로 대체하여 로딩 표시
+    # 요청하신 대로 st.spinner로 대체하여 로딩 표시
     with st.spinner("💬 AI가 답변을 구성 중입니다..."):
         answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
                                              timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
@@ -674,12 +681,13 @@ if not st.session_state["chat"]:
     """, unsafe_allow_html=True)
     
     # Usage/Disclaimer Note (Bigger, more visible, framed)
+    # **CSS 클래스 'usage-box'를 사용하여 크기, 너비, 줄바꿈 수정**
     st.markdown("""
-    <div style="text-align:center; font-size:1.0rem; color:#1f2937; margin-top:40px; padding:12px 20px; border-radius:12px; background-color: #eef2ff; border: 1px solid #c7d2fe; max-width: 600px; margin-left: auto; margin-right: auto;">
+    <div class="usage-box">
         💡 **사용법:** **키워드**와 **기간**을 명시해 질문하세요 (예: '최근 24시간 태풍상사 반응').
         <br>※ 첫 질문 시 데이터 수집에 시간이 소요되며, 한 세션에서 하나의 주제만 질문해야 합니다.
     </div>
-    <div style="margin-bottom:150px;"></div> <!-- 입력창과 겹치지 않도록 여백 확보 (입력창이 2rem 위에 고정되므로 더 많은 여백 필요) -->
+    <div style="margin-bottom:150px;"></div> <!-- 입력창과 겹치지 않도록 여백 확보 -->
     """, unsafe_allow_html=True)
 # **************************************************************************
 
