@@ -567,7 +567,6 @@ def run_pipeline_first_turn(user_query: str):
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
 
     scroll_to_bottom()
-    safe_rerun()
 
 def run_followup_turn(user_query: str):
     schema = st.session_state.get("last_schema") or {}
