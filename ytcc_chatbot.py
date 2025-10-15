@@ -18,10 +18,9 @@ import google.generativeai as genai
 from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
-# 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
 st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
+# [수정] 챗봇 UI 스타일 (AI 답변 박스, 사용자 질문 우측 정렬)
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -39,8 +38,37 @@ st.markdown("""
 header {visibility: hidden;}
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
+
+/* 채팅 메시지 기본 스타일 */
+[data-testid="stChatMessage"] {
+    width: fit-content;
+    max-width: 80%; /* 너무 길어지지 않도록 */
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border-radius: 18px;
+}
+
+/* AI 답변 (assistant) 스타일 */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
+    background-color: #f0f2f6;
+    color: #050505;
+}
+
+/* 사용자 질문 (user) 스타일 */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
+    background-color: #0084ff;
+    color: white;
+    margin-left: auto; /* 우측 정렬 */
+}
+/* 사용자 메시지 내부 텍스트 색상 */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) p,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) li,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) code {
+    color: white;
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 BASE_DIR = "/tmp"; os.makedirs(BASE_DIR, exist_ok=True)
 KST = timezone(timedelta(hours=9))
@@ -185,13 +213,11 @@ LIGHT_PROMPT = (
     "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
     "규칙:\n"
     "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
-    "- **키워드는 분석의 가장 핵심이 되는 주제(IP, 프로그램명, 배우이름, 등장인물 이름 등) 1개로 한정하고, 나머지는 엔티티로 분류하라.**\n"
-    "- **프로그램명과 인물명이 동시에 나올경우, 프로그램명이 우선 키워드이다"
     "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
     "출력(6줄 고정):\n"
     "- 한 줄 요약: <문장>\n"
     "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
-    "- 키워드: [<메인1>]\n"
+    "- 키워드: [<메인1>, <메인2>…]\n"
     "- 엔티티/보조: [<보조들>]\n"
     "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
     "- 원문: {USER_QUERY}\n\n"
@@ -253,10 +279,6 @@ def parse_light_block_to_schema(light_text: str) -> dict:
         if ir: options["include_replies"] = (ir.group(1).lower()=="true")
         if cf: options["channel_filter"] = cf.group(1)
         if lg: options["lang"] = lg.group(1)
-    
-    # **[추가] 원문 추출 로직**
-    m_orig = re.search(r"원문\s*:\s*(.*)", raw)
-    original_query = m_orig.group(1).strip() if m_orig else ""
 
     if not start_iso or not end_iso:
         end_dt = now_kst(); start_dt = end_dt - timedelta(hours=24)
@@ -265,11 +287,7 @@ def parse_light_block_to_schema(light_text: str) -> dict:
         m = re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)
         keywords = [m[0]] if m else ["유튜브"]
 
-    return {
-        "start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, 
-        "entities": entities, "options": options, "raw": raw,
-        "original_query": original_query # **[추가] 결과에 원문 포함**
-    }
+    return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
@@ -396,23 +414,51 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars_per_comment=280, max_total_chars=420_000):
+# [수정] 댓글 샘플링 로직 변경 (좋아요 1000 + 랜덤 1000)
+def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000):
     if not csv_path or not os.path.exists(csv_path): return "", 0, 0
-    lines, total = [], 0; remaining = max_rows
-    for chunk in pd.read_csv(csv_path, chunksize=120_000):
-        if "likeCount" in chunk.columns: chunk = chunk.sort_values("likeCount", ascending=False)
-        for _, r in chunk.iterrows():
-            if remaining <= 0 or total >= max_total_chars: break
-            is_reply = "R" if int(r.get("isReply",0) or 0)==1 else "T"
-            author = str(r.get("author","") or "").replace("\n"," ")
-            likec = int(r.get("likeCount",0) or 0)
-            text = str(r.get("text","") or "").replace("\n"," ")
-            if len(text) > max_chars_per_comment: text = text[:max_chars_per_comment] + "…"
-            line = f"[{is_reply}|♥{likec}] {author}: {text}"
-            if total + len(line) + 1 > max_total_chars: break
-            lines.append(line); total += len(line)+1; remaining -= 1
-        if remaining <= 0 or total >= max_total_chars: break
-    return "\n".join(lines), len(lines), total
+    
+    try:
+        # 전체 데이터를 읽어옴 (메모리 사용량에 주의해야 하지만, 샘플링을 위해 필요)
+        df_all = pd.read_csv(csv_path)
+        if df_all.empty: return "", 0, 0
+    except Exception:
+        return "", 0, 0
+
+    # 1. 좋아요 순 상위 1000개 샘플링
+    df_top_likes = df_all.sort_values("likeCount", ascending=False).head(1000)
+
+    # 2. 나머지 데이터에서 랜덤 1000개 샘플링
+    df_remaining = df_all.drop(df_top_likes.index)
+    
+    # 남은 댓글이 1000개보다 적을 경우, 있는 만큼만 사용
+    random_sample_size = min(1000, len(df_remaining))
+    df_random = df_remaining.sample(n=random_sample_size) if random_sample_size > 0 else pd.DataFrame()
+
+    # 3. 두 데이터프레임 병합
+    df_sample = pd.concat([df_top_likes, df_random])
+    
+    # 직렬화
+    lines, total_chars = [], 0
+    for _, r in df_sample.iterrows():
+        if total_chars >= max_total_chars: break
+        
+        is_reply = "R" if int(r.get("isReply",0) or 0)==1 else "T"
+        author = str(r.get("author","") or "").replace("\n"," ")
+        likec = int(r.get("likeCount",0) or 0)
+        text = str(r.get("text","") or "").replace("\n"," ")
+        
+        if len(text) > max_chars_per_comment: text = text[:max_chars_per_comment] + "…"
+        
+        line = f"[{is_reply}|♥{likec}] {author}: {text}"
+        
+        if total_chars + len(line) + 1 > max_total_chars: break
+            
+        lines.append(line)
+        total_chars += len(line) + 1
+
+    return "\n".join(lines), len(lines), total_chars
+
 
 TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")
 HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
@@ -495,11 +541,9 @@ def run_pipeline_first_turn(user_query: str):
     prog.progress(0.90, text="AI 분석중…")
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
-           "먼저 아래 [사용자 원본 질문]의 핵심 의도(특정 인물, 긍/부정 등)를 파악한 뒤, "
-           "주어진 키워드/엔티티와 댓글 샘플을 바탕으로 해당 의도에 맞춰 핵심 포인트를 항목화하고, "
+           "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
            "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
     payload = (
-        f"[사용자 원본 질문]: {schema.get('original_query', user_query)}\n"
         f"[키워드]: {', '.join(kw_main)}\n"
         f"[엔티티]: {', '.join(kw_ent)}\n"
         f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
@@ -537,7 +581,7 @@ def run_followup_turn(user_query: str):
     context = "\n".join(lines)
 
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
-           "아래는 직렬화된 댓글 샘플(고정)과 이전 대화 맥락이다. "
+           "아래는 직렬화된 댓글 샘플(고정)과 이전 대화 맥이다. "
            "현재 질문에 대해 간결하고 구조화된 답을 한국어로 하라. "
            "반드시 댓글 샘플을 근거로 답하고, 인용 예시는 5개 이하로 제시하라.")
     payload = (
@@ -558,18 +602,14 @@ def run_followup_turn(user_query: str):
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
     scroll_to_bottom()
 
-# -------------------- 메인 화면 --------------------
-
-# 첫 로딩 시 스피너 표시
+# -------------------- 메인 화면 (수정 없음) --------------------
 if not st.session_state.init_done:
     with st.spinner("로딩 중..."):
-        time.sleep(1.5) # 초기 로딩 시뮬레이션
+        time.sleep(1.5) 
     st.session_state.init_done = True
     st.rerun()
 
-# 채팅 시작 여부에 따라 화면 분기
 if not st.session_state["chat"]:
-    # [수정] 원래의 초기 화면으로 복원
     st.markdown("""
         <style>
             .welcome-container {
@@ -617,11 +657,9 @@ if not st.session_state["chat"]:
         </div>
     """, unsafe_allow_html=True)
 else:
-    # 채팅이 시작되면 기존 채팅 화면을 렌더링
     render_metadata_outside_chat()
     render_chat()
 
-# 채팅 입력창 (항상 페이지 하단에 위치)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
 if prompt:
     st.session_state["chat"].append({"role":"user","content":prompt})
@@ -631,8 +669,6 @@ if prompt:
     
     scroll_to_bottom()
 
-    # [수정] 파이프라인 실행 로직 (버그 수정)
-    # len(st.session_state.get("last_csv", "")) > 0 조건은 첫 질문 이후에만 참이 됨
     if st.session_state.get("last_csv"):
         run_followup_turn(prompt)
     else:
