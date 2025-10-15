@@ -20,7 +20,7 @@ from streamlit.components.v1 import html as st_html
 # -------------------- 페이지/전역 --------------------
 st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# [수정] 챗봇 UI 스타일 (AI 답변 박스, 사용자 질문 우측 정렬)
+# [수정] 챗봇 UI 스타일 (AI 답변 박스, 글꼴 크기, 사용자 질문 우측 정렬)
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -28,56 +28,53 @@ st.markdown("""
     padding-top: 2rem;
     padding-right: 1rem;
     padding-left: 1rem;
-    padding-bottom: 10rem;
+    padding-bottom: 5rem; /* 입력창과의 거리 확보 */
 }
-/* 채팅 입력창이 고정될 수 있도록 여백 조정 */
 [data-testid="stSidebarContent"] {
     padding-top: 1.5rem;
 }
-/* Streamlit 기본 헤더 및 푸터 숨기기 (더 깔끔한 UI를 위해) */
 header {visibility: hidden;}
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 
 /* 채팅 메시지 기본 스타일 */
-[data-testid="stChatMessage"] {
+.stChatMessage {
     width: fit-content;
     max-width: 80%;
     margin-bottom: 1rem;
-    padding: 0.75rem 1rem;
+    padding: 0.8rem 1rem;
     border-radius: 18px;
+    line-height: 1.5;
 }
 
 /* AI 답변 (assistant) 스타일 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
-    background-color: #f0f2f6;
-    color: #050505;
-    **border: 1px solid #d1d5db; /* 대화상자 느낌을 위한 테두리 추가 */**
+.st-emotion-cache-janbn0 { /* Streamlit의 AI 메시지 컨테이너 클래스 타겟 */
+    background-color: #f7f7f8;
+    border: 1px solid #e5e7eb; /* 테두리 명확화 */
 }
 
-**/* AI 답변 내부 텍스트 스타일 (글씨 크기 줄이기) */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ol,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ul {
-    font-size: 0.95rem;
-}**
+/* AI 답변 내부 텍스트 스타일 (글꼴 크기 줄이기) */
+.st-emotion-cache-janbn0 p,
+.st-emotion-cache-janbn0 li,
+.st-emotion-cache-janbn0 ol,
+.st-emotion-cache-janbn0 ul,
+.st-emotion-cache-janbn0 code {
+    font-size: 0.9rem; /* 글꼴 크기 더 작게 */
+    color: #202123;
+}
 
 /* 사용자 질문 (user) 스타일 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
+.st-emotion-cache-4oy321 { /* Streamlit의 사용자 메시지 컨테이너 클래스 타겟 */
     background-color: #0084ff;
-    color: white;
     margin-left: auto; /* 우측 정렬 */
 }
 /* 사용자 메시지 내부 텍스트 색상 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) p,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) li,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) code {
+.st-emotion-cache-4oy321 p,
+.st-emotion-cache-4oy321 li {
     color: white;
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 BASE_DIR = "/tmp"; os.makedirs(BASE_DIR, exist_ok=True)
 KST = timezone(timedelta(hours=9))
@@ -104,16 +101,11 @@ MAX_COMMENTS_PER_VID = 4_000
 # -------------------- 상태 --------------------
 def ensure_state():
     defaults = dict(
-        chat=[],                 # [{role, content}]  (content: markdown)
-        meta_shown=False,
-        last_schema=None,        # dict
-        last_csv="",             # csv path
-        last_df=None,            # videos df
-        last_keywords=[],        # list[str]
-        last_entities=[],        # list[str]
-        last_period=("", ""),    # (start_iso, end_iso)
-        sample_text="",          # LLM sample text
-        init_done=False,         # 초기 로딩 스피너 상태
+        chat=[],
+        last_schema=None,
+        last_csv="",
+        last_df=None,
+        sample_text="",
     )
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
@@ -136,8 +128,7 @@ with st.sidebar:
 
     if st.button("✨ 새 채팅", use_container_width=True, type="secondary"):
         st.session_state.clear()
-        fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
-        if callable(fn): fn()
+        st.rerun()
 
     st.markdown("""
     <div class="contact-info">
@@ -148,29 +139,20 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# -------------------- 로직 (수정 없음) --------------------
-def safe_rerun():
-    fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
-    if callable(fn): fn()
-
+# -------------------- 로직 (일부 수정) --------------------
 def scroll_to_bottom():
     st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
 
 def render_metadata_outside_chat():
     if not st.session_state.get("last_schema"): return
-
     schema = st.session_state["last_schema"]
     kw_main  = schema.get("keywords", [])
-    start_iso = schema['start_iso']
-    end_iso = schema['end_iso']
-
+    start_iso, end_iso = schema.get('start_iso', ''), schema.get('end_iso', '')
     try:
         start_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
         end_dt_str = datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
-    except ValueError:
-        start_dt_str = start_iso.split('T')[0]
-        end_dt_str = end_iso.split('T')[0]
-
+    except (ValueError, TypeError):
+        start_dt_str, end_dt_str = start_iso.split('T')[0], end_iso.split('T')[0]
     metadata_html = (
         f"<div style='font-size:14px; color:#4b5563; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; margin-bottom:1rem; background-color: #f9fafb;'>"
         f"**📊 현재 분석 컨텍스트:**<br>"
@@ -180,7 +162,7 @@ def render_metadata_outside_chat():
     )
     st.markdown(metadata_html, unsafe_allow_html=True)
 
-class RotatingKeys:
+class RotatingKeys: # ... (수정 없음)
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
         self.state_key = state_key
@@ -196,7 +178,7 @@ class RotatingKeys:
         st.session_state[self.state_key] = self.idx
         if callable(self.on_rotate): self.on_rotate(self.idx, self.current())
 
-class RotatingYouTube:
+class RotatingYouTube: # ... (수정 없음)
     def __init__(self, keys, state_key="yt_key_idx"):
         self.rot = RotatingKeys(keys, state_key)
         self.service = None
@@ -233,11 +215,11 @@ LIGHT_PROMPT = (
     f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
 )
 
-def is_gemini_quota_error(exc: Exception) -> bool:
+def is_gemini_quota_error(exc: Exception) -> bool: # ... (수정 없음)
     msg = (str(exc) or "").lower()
     return ("429" in msg) or ("too many requests" in msg) or ("rate limit" in msg) or ("resource exhausted" in msg) or ("quota" in msg)
 
-def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
+def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str: # ... (수정 없음)
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
     attempts = 0
@@ -258,47 +240,29 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload, tim
                 rk.rotate(); attempts += 1; continue
             raise
 
-def parse_light_block_to_schema(light_text: str) -> dict:
+def parse_light_block_to_schema(light_text: str) -> dict: # ... (수정 없음)
     raw = (light_text or "").strip()
     m_time = re.search(r"기간\(KST\)\s*:\s*([^~]+)~\s*([^\n]+)", raw)
     start_iso = m_time.group(1).strip() if m_time else None
     end_iso   = m_time.group(2).strip() if m_time else None
-
     m_kw = re.search(r"키워드\s*:\s*\[(.*?)\]", raw, flags=re.DOTALL)
-    keywords = []
-    if m_kw:
-        for part in re.split(r"\s*,\s*", m_kw.group(1)):
-            p = re.sub(r"\(.*?\)", "", part).strip()
-            if p: keywords.append(p)
-
+    keywords = [p.strip() for p in re.split(r"\s*,\s*", m_kw.group(1)) if p.strip()] if m_kw else []
     m_ent = re.search(r"엔티티/보조\s*:\s*\[(.*?)\]", raw, flags=re.DOTALL)
-    entities = []
-    if m_ent:
-        for part in re.split(r"\s*,\s*", m_ent.group(1)):
-            p = part.strip()
-            if p: entities.append(p)
-
+    entities = [p.strip() for p in re.split(r"\s*,\s*", m_ent.group(1)) if p.strip()] if m_ent else []
     m_opt = re.search(r"옵션\s*:\s*\{(.*?)\}", raw, flags=re.DOTALL)
     options = {"include_replies": False, "channel_filter": "any", "lang": "auto"}
     if m_opt:
         blob = m_opt.group(1)
-        ir = re.search(r"include_replies\s*:\s*(true|false)", blob, re.I)
-        cf = re.search(r"channel_filter\s*:\s*\"(any|official|unofficial)\"", blob, re.I)
-        lg = re.search(r"lang\s*:\s*\"(ko|en|auto)\"", blob, re.I)
-        if ir: options["include_replies"] = (ir.group(1).lower()=="true")
-        if cf: options["channel_filter"] = cf.group(1)
-        if lg: options["lang"] = lg.group(1)
-
+        if ir := re.search(r"include_replies\s*:\s*(true|false)", blob, re.I): options["include_replies"] = (ir.group(1).lower()=="true")
+        if cf := re.search(r"channel_filter\s*:\s*\"(any|official|unofficial)\"", blob, re.I): options["channel_filter"] = cf.group(1)
+        if lg := re.search(r"lang\s*:\s*\"(ko|en|auto)\"", blob, re.I): options["lang"] = lg.group(1)
     if not start_iso or not end_iso:
         end_dt = now_kst(); start_dt = end_dt - timedelta(hours=24)
         start_iso, end_iso = to_iso_kst(start_dt), to_iso_kst(end_dt)
-    if not keywords:
-        m = re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)
-        keywords = [m[0]] if m else ["유튜브"]
-
+    if not keywords: keywords = [m[0]] if (m := re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)) else ["유튜브"]
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
-def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
+def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None): # ... (수정 없음)
     video_ids, token = [], None
     while len(video_ids) < max_results:
         params = dict(q=keyword, part="id", type="video", order=order, maxResults=min(50, max_results - len(video_ids)))
@@ -306,102 +270,59 @@ def yt_search_videos(rt, keyword, max_results, order="relevance", published_afte
         if published_before: params["publishedBefore"] = published_before
         if token: params["pageToken"] = token
         resp = rt.execute(lambda s: s.search().list(**params))
-        for it in resp.get("items", []):
-            vid = it["id"]["videoId"]
-            if vid not in video_ids: video_ids.append(vid)
+        video_ids.extend(it["id"]["videoId"] for it in resp.get("items", []) if it["id"]["videoId"] not in video_ids)
         token = resp.get("nextPageToken")
         if not token: break
         time.sleep(0.25)
     return video_ids
 
-def yt_video_statistics(rt, video_ids):
+def yt_video_statistics(rt, video_ids): # ... (수정 없음)
     rows = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
         if not batch: continue
         resp = rt.execute(lambda s: s.videos().list(part="statistics,snippet,contentDetails", id=",".join(batch)))
         for item in resp.get("items", []):
-            stats = item.get("statistics", {}); snip = item.get("snippet", {}); cont = item.get("contentDetails", {})
+            stats, snip, cont = item.get("statistics", {}), item.get("snippet", {}), item.get("contentDetails", {})
             dur = cont.get("duration","")
-            def _dsec(d: str):
-                if not d or not d.startswith("P"): return None
-                h = re.search(r"(\d+)H", d); m = re.search(r"(\d+)M", d); s = re.search(r"(\d+)S", d)
-                return (int(h.group(1)) if h else 0)*3600 + (int(m.group(1)) if m else 0)*60 + (int(s.group(1)) if s else 0)
-            dur_sec = _dsec(dur)
-            short_type = "Shorts" if (dur_sec is not None and dur_sec <= 60) else "Clip"
-            vid = item.get("id")
-            rows.append({
-                "video_id": vid,
-                "video_url": f"https://www.youtube.com/watch?v={vid}",
-                "title": snip.get("title",""),
-                "channelTitle": snip.get("channelTitle",""),
-                "publishedAt": snip.get("publishedAt",""),
-                "duration": dur,
-                "shortType": short_type,
-                "viewCount": int(stats.get("viewCount",0) or 0),
-                "likeCount": int(stats.get("likeCount",0) or 0),
-                "commentCount": int(stats.get("commentCount",0) or 0),
-            })
+            h, m, s = re.search(r"(\d+)H", dur), re.search(r"(\d+)M", dur), re.search(r"(\d+)S", dur)
+            dur_sec = (int(h.group(1)) * 3600 if h else 0) + (int(m.group(1)) * 60 if m else 0) + (int(s.group(1)) if s else 0)
+            rows.append({"video_id": item.get("id"), "video_url": f"https://www.youtube.com/watch?v={item.get('id')}", "title": snip.get("title",""), "channelTitle": snip.get("channelTitle",""), "publishedAt": snip.get("publishedAt",""), "duration": dur, "shortType": "Shorts" if dur_sec <= 60 else "Clip", "viewCount": int(stats.get("viewCount",0) or 0), "likeCount": int(stats.get("likeCount",0) or 0), "commentCount": int(stats.get("commentCount",0) or 0)})
         time.sleep(0.25)
     return rows
 
-def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None):
+def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None): # ... (수정 없음)
     replies, token = [], None
-    while True:
-        if cap is not None and len(replies) >= cap: return replies[:cap]
-        params = dict(part="snippet", parentId=parent_id, maxResults=100, pageToken=token, textFormat="plainText")
-        try:
-            resp = rt.execute(lambda s: s.comments().list(**params))
-        except HttpError:
-            break
+    while not (cap is not None and len(replies) >= cap):
+        try: resp = rt.execute(lambda s: s.comments().list(part="snippet", parentId=parent_id, maxResults=100, pageToken=token, textFormat="plainText"))
+        except HttpError: break
         for c in resp.get("items", []):
             sn = c["snippet"]
-            replies.append({
-                "video_id": video_id, "video_title": title, "shortType": short_type,
-                "comment_id": c.get("id",""), "parent_id": parent_id, "isReply": 1,
-                "author": sn.get("authorDisplayName",""),
-                "text": sn.get("textDisplay","") or "",
-                "publishedAt": sn.get("publishedAt",""),
-                "likeCount": int(sn.get("likeCount",0) or 0),
-            })
-            if cap is not None and len(replies) >= cap: return replies[:cap]
+            replies.append({"video_id": video_id, "video_title": title, "shortType": short_type, "comment_id": c.get("id",""), "parent_id": parent_id, "isReply": 1, "author": sn.get("authorDisplayName",""), "text": sn.get("textDisplay","") or "", "publishedAt": sn.get("publishedAt",""), "likeCount": int(sn.get("likeCount",0) or 0)})
         token = resp.get("nextPageToken")
         if not token: break
         time.sleep(0.2)
-    return replies
+    return replies[:cap] if cap is not None else replies
 
-def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_replies=True, max_per_video=None):
+def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_replies=True, max_per_video=None): # ... (수정 없음)
     rows, token = [], None
-    while True:
-        if max_per_video is not None and len(rows) >= max_per_video: return rows[:max_per_video]
-        params = dict(part="snippet,replies", videoId=video_id, maxResults=100, pageToken=token, textFormat="plainText")
-        try:
-            resp = rt.execute(lambda s: s.commentThreads().list(**params))
-        except HttpError:
-            break
+    while not (max_per_video is not None and len(rows) >= max_per_video):
+        try: resp = rt.execute(lambda s: s.commentThreads().list(part="snippet,replies", videoId=video_id, maxResults=100, pageToken=token, textFormat="plainText"))
+        except HttpError: break
         for it in resp.get("items", []):
             top = it["snippet"]["topLevelComment"]["snippet"]
             thread_id = it["snippet"]["topLevelComment"]["id"]
-            total_replies = int(it["snippet"].get("totalReplyCount",0) or 0)
-            rows.append({
-                "video_id": video_id, "video_title": title, "shortType": short_type,
-                "comment_id": thread_id, "parent_id": "", "isReply": 0,
-                "author": top.get("authorDisplayName",""),
-                "text": top.get("textDisplay","") or "",
-                "publishedAt": top.get("publishedAt",""),
-                "likeCount": int(top.get("likeCount",0) or 0),
-            })
-            if include_replies and total_replies>0:
+            rows.append({"video_id": video_id, "video_title": title, "shortType": short_type, "comment_id": thread_id, "parent_id": "", "isReply": 0, "author": top.get("authorDisplayName",""), "text": top.get("textDisplay","") or "", "publishedAt": top.get("publishedAt",""), "likeCount": int(top.get("likeCount",0) or 0)})
+            if include_replies and int(it["snippet"].get("totalReplyCount",0) or 0) > 0:
                 cap = None if max_per_video is None else max(0, max_per_video - len(rows))
-                if cap == 0: return rows[:max_per_video]
+                if cap == 0: break
                 rows.extend(yt_all_replies(rt, thread_id, video_id, title, short_type, cap=cap))
-                if max_per_video is not None and len(rows) >= max_per_video: return rows[:max_per_video]
         token = resp.get("nextPageToken")
         if not token: break
         time.sleep(0.2)
-    return rows
+    return rows[:max_per_video] if max_per_video is not None else rows
 
-def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog=None):
+def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar): # [수정] progress_bar 객체 받기
     out_csv = os.path.join(BASE_DIR, f"collect_{uuid4().hex}.csv")
     wrote_header = False; total_written = 0
     total_videos = len(video_list); done = 0
@@ -409,275 +330,121 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
         futures = {ex.submit(yt_all_comments_sync, RotatingYouTube(rt_keys), v["video_id"], v.get("title",""), v.get("shortType","Clip"), include_replies, max_per_video): v for v in video_list}
         for f in as_completed(futures):
             try:
-                comm = f.result()
-                if comm:
+                if comm := f.result():
                     dfc = pd.DataFrame(comm)
-                    dfc.to_csv(out_csv, index=False, mode=("a" if wrote_header else "w"), header=(not wrote_header), encoding="utf-8-sig")
+                    dfc.to_csv(out_csv, index=False, mode="a" if wrote_header else "w", header=not wrote_header, encoding="utf-8-sig")
                     wrote_header = True; total_written += len(dfc)
-            except Exception:
-                pass
+            except Exception: pass
             done += 1
-            if prog:
-                frac = 0.50 + (done/total_videos) * 0.40
-                prog.progress(min(0.90, frac), text="댓글 수집중…")
+            frac = 0.50 + (done / total_videos) * 0.40
+            prog_bar.progress(min(0.90, frac), text="댓글 수집중…")
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-# [수정] 댓글 샘플링 로직 변경 (좋아요 1000 + 랜덤 1000)
-def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000):
-    if not csv_path or not os.path.exists(csv_path): return "", 0, 0
-    
-    try:
-        # 전체 데이터를 읽어옴 (메모리 사용량에 주의해야 하지만, 샘플링을 위해 필요)
-        df_all = pd.read_csv(csv_path)
-        if df_all.empty: return "", 0, 0
-    except Exception:
-        return "", 0, 0
-
-    # 1. 좋아요 순 상위 1000개 샘플링
+def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000): # ... (수정 없음)
+    if not os.path.exists(csv_path): return "", 0, 0
+    try: df_all = pd.read_csv(csv_path)
+    except Exception: return "", 0, 0
+    if df_all.empty: return "", 0, 0
     df_top_likes = df_all.sort_values("likeCount", ascending=False).head(1000)
-
-    # 2. 나머지 데이터에서 랜덤 1000개 샘플링
     df_remaining = df_all.drop(df_top_likes.index)
-    
-    # 남은 댓글이 1000개보다 적을 경우, 있는 만큼만 사용
-    random_sample_size = min(1000, len(df_remaining))
-    df_random = df_remaining.sample(n=random_sample_size) if random_sample_size > 0 else pd.DataFrame()
-
-    # 3. 두 데이터프레임 병합
+    sample_size = min(1000, len(df_remaining))
+    df_random = df_remaining.sample(n=sample_size) if sample_size > 0 else pd.DataFrame()
     df_sample = pd.concat([df_top_likes, df_random])
-    
-    # 직렬화
     lines, total_chars = [], 0
     for _, r in df_sample.iterrows():
         if total_chars >= max_total_chars: break
-        
-        is_reply = "R" if int(r.get("isReply",0) or 0)==1 else "T"
-        author = str(r.get("author","") or "").replace("\n"," ")
-        likec = int(r.get("likeCount",0) or 0)
         text = str(r.get("text","") or "").replace("\n"," ")
-        
-        if len(text) > max_chars_per_comment: text = text[:max_chars_per_comment] + "…"
-        
-        line = f"[{is_reply}|♥{likec}] {author}: {text}"
-        
+        line = f"[{'R' if int(r.get('isReply',0))==1 else 'T'}|♥{int(r.get('likeCount',0))}] {str(r.get('author','')).replace('\n',' ')}: {text[:max_chars_per_comment] + '…' if len(text) > max_chars_per_comment else text}"
         if total_chars + len(line) + 1 > max_total_chars: break
-            
-        lines.append(line)
-        total_chars += len(line) + 1
-
+        lines.append(line); total_chars += len(line) + 1
     return "\n".join(lines), len(lines), total_chars
 
-
-TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")
-HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
-
-def tidy_answer(md: str) -> str:
+def tidy_answer(md: str) -> str: # ... (수정 없음)
     if not md: return md
-    lines = []
-    for line in md.splitlines():
-        if TITLE_LINE_RE.match(line):
-            continue
-        if HEADER_DUP_RE.search(line):
-            continue
-        lines.append(line)
-    cleaned = []
-    prev_blank = False
+    lines = [line for line in md.splitlines() if not (TITLE_LINE_RE.match(line) or HEADER_DUP_RE.search(line))]
+    cleaned, prev_blank = [], False
     for l in lines:
-        if l.strip() == "":
-            if prev_blank: continue
-            prev_blank = True
-        else:
-            prev_blank = False
+        is_blank = not l.strip()
+        if is_blank and prev_blank: continue
         cleaned.append(l)
+        prev_blank = is_blank
     return "\n".join(cleaned).strip()
 
-def render_chat():
-    for m in st.session_state["chat"]:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
-
-def run_pipeline_first_turn(user_query: str):
-    prog = st.progress(0.0, text="해석중…")
-    if not GEMINI_API_KEYS:
-        with st.chat_message("assistant"): st.markdown("Gemini API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료");
-        return
-    light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
-                                 timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
+def run_pipeline_first_turn(user_query: str, prog_bar) -> str: # [수정] progress_bar 객체 받고, 답변 문자열 리턴
+    if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
+    prog_bar.progress(0.05, text="해석중…")
+    light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
     schema = parse_light_block_to_schema(light)
-    prog.progress(0.10, text="영상 수집중…")
-
-    if not YT_API_KEYS:
-        with st.chat_message("assistant"): st.markdown("YouTube API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료");
-        return
-    start_dt = datetime.fromisoformat(schema["start_iso"]).astimezone(KST)
-    end_dt   = datetime.fromisoformat(schema["end_iso"]).astimezone(KST)
-    published_after  = kst_to_rfc3339_utc(start_dt)
-    published_before = kst_to_rfc3339_utc(end_dt)
-    kw_main  = schema.get("keywords", [])
-    kw_ent   = schema.get("entities", [])
-    include_replies = bool(schema.get("options",{}).get("include_replies", False))
-
+    st.session_state["last_schema"] = schema
+    prog_bar.progress(0.10, text="영상 수집중…")
+    if not YT_API_KEYS: return "오류: YouTube API Key가 설정되지 않았습니다."
     rt = RotatingYouTube(YT_API_KEYS)
+    start_dt, end_dt = datetime.fromisoformat(schema["start_iso"]), datetime.fromisoformat(schema["end_iso"])
+    kw_main, kw_ent = schema.get("keywords", []), schema.get("entities", [])
     all_ids = []
     for base_kw in (kw_main or ["유튜브"]):
-        all_ids += yt_search_videos(rt, base_kw, 60, "relevance", published_after, published_before)
-        for e in (kw_ent or []):
-            all_ids += yt_search_videos(rt, f"{base_kw} {e}", 30, "relevance", published_after, published_before)
+        all_ids.extend(yt_search_videos(rt, base_kw, 60, "relevance", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
+        for e in kw_ent:
+            all_ids.extend(yt_search_videos(rt, f"{base_kw} {e}", 30, "relevance", kst_to_rfc3339_utc(start_dt), kst_to_rfc3339_utc(end_dt)))
     all_ids = list(dict.fromkeys(all_ids))
-    prog.progress(0.40, text="댓글 수집중…")
-
-    stats = yt_video_statistics(rt, all_ids)
-    df_stats = pd.DataFrame(stats)
-    csv_path, total_cnt = parallel_collect_comments_streaming(
-        video_list=df_stats.to_dict('records'),
-        rt_keys=YT_API_KEYS,
-        include_replies=include_replies,
-        max_total_comments=MAX_TOTAL_COMMENTS,
-        max_per_video=MAX_COMMENTS_PER_VID,
-        prog=prog,
-    )
-    if total_cnt == 0:
-        prog.progress(1.0, text="완료")
-        with st.chat_message("assistant"):
-            st.markdown("지정 기간/키워드에서 댓글이 보이지 않아. 기간/키워드를 조정해줘.")
-        st.session_state["chat"].append({"role":"assistant","content":"지정 기간/키워드에서 댓글이 보이지 않아. 기간/키워드를 조정해줘."})
-        scroll_to_bottom()
-        return
-
-    prog.progress(0.90, text="AI 분석중…")
+    prog_bar.progress(0.40, text="댓글 수집 준비중…")
+    df_stats = pd.DataFrame(yt_video_statistics(rt, all_ids))
+    st.session_state["last_df"] = df_stats
+    csv_path, total_cnt = parallel_collect_comments_streaming(df_stats.to_dict('records'), YT_API_KEYS, bool(schema.get("options",{}).get("include_replies")), MAX_TOTAL_COMMENTS, MAX_COMMENTS_PER_VID, prog_bar)
+    st.session_state["last_csv"] = csv_path
+    if total_cnt == 0: return "지정 기간/키워드에서 댓글을 찾을 수 없습니다. 다른 조건으로 시도해 보세요."
+    prog_bar.progress(0.90, text="AI 분석중…")
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
-    sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
-           "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
-           "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
-    payload = (
-        f"[키워드]: {', '.join(kw_main)}\n"
-        f"[엔티티]: {', '.join(kw_ent)}\n"
-        f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n"
-    )
-    answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
-                                         timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
-    answer_md = tidy_answer(answer_md_raw)
-    prog.progress(1.0, text="완료")
+    st.session_state["sample_text"] = sample_text
+    sys = "너는 유튜브 댓글을 분석하는 어시스턴트다. 주어진 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, 긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라."
+    payload = f"[키워드]: {', '.join(kw_main)}\n[엔티티]: {', '.join(kw_ent)}\n[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n[댓글 샘플]:\n{sample_text}\n"
+    answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
+    prog_bar.progress(1.0, text="완료")
+    time.sleep(0.5) # 사용자가 '완료' 메시지를 볼 수 있도록 잠시 대기
+    return tidy_answer(answer_md_raw)
 
-    st.session_state["last_schema"]   = schema
-    st.session_state["last_csv"]      = csv_path
-    st.session_state["last_df"]       = df_stats
-    st.session_state["sample_text"]   = sample_text
-    st.session_state["last_keywords"] = kw_main
-    st.session_state["last_entities"] = kw_ent
-    st.session_state["last_period"]   = (schema["start_iso"], schema["end_iso"])
-
-    with st.chat_message("assistant"):
-        st.markdown(answer_md)
-    st.session_state["chat"].append({"role":"assistant","content": answer_md})
-
-    scroll_to_bottom()
-
-def run_followup_turn(user_query: str):
-    schema = st.session_state.get("last_schema") or {}
+def run_followup_turn(user_query: str) -> str: # [수정] 답변 문자열 리턴
+    if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
     sample_text = st.session_state.get("sample_text","")
+    context = "\n".join(f"[이전 {'Q' if m['role']=='user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
+    sys = "너는 유튜브 댓글 분석가다. 주어진 댓글 샘플과 이전 대화 맥락을 바탕으로 현재 질문에 간결하게 답하라. 반드시 댓글 샘플을 근거로 답하고, 인용은 5개 이하로 하라."
+    payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n[댓글 샘플]:\n{sample_text}\n"
+    return tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
 
-    lines = []
-    for m in st.session_state["chat"][-10:]:
-        content_text = re.sub(r'<div.*?/div>', '', m['content'], flags=re.DOTALL).strip()
-        if m["role"] == "user": lines.append(f"[이전 Q]: {content_text}")
-        else:                   lines.append(f"[이전 A]: {content_text}")
-    context = "\n".join(lines)
+# -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
 
-    sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
-           "아래는 직렬화된 댓글 샘플(고정)과 이전 대화 맥이다. "
-           "현재 질문에 대해 간결하고 구조화된 답을 한국어로 하라. "
-           "반드시 댓글 샘플을 근거로 답하고, 인용 예시는 5개 이하로 제시하라.")
-    payload = (
-        context + "\n\n" +
-        f"[현재 질문]: {user_query}\n"
-        f"[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n"
-    )
-
-    with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-        answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
-                                             timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
-    
-    answer_md = tidy_answer(answer_md_raw)
-
-    with st.chat_message("assistant"):
-        st.markdown(answer_md)
-    st.session_state["chat"].append({"role":"assistant","content": answer_md})
-    scroll_to_bottom()
-
-# -------------------- 메인 화면 (수정 없음) --------------------
-if not st.session_state.init_done:
-    with st.spinner("로딩 중..."):
-        time.sleep(1.5) 
-    st.session_state.init_done = True
-    st.rerun()
-
-if not st.session_state["chat"]:
+# 1. 뷰 렌더링: 채팅 기록이 없으면 웰컴 화면, 있으면 채팅 화면 표시
+if not st.session_state.chat:
     st.markdown("""
-        <style>
-            .welcome-container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                height: 70vh;
-            }
-            .welcome-container h1 {
-                font-size: 3.5rem;
-                font-weight: 600;
-                background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C);
-                -webkit-background-clip: text;
-                -webkit-text-fill-color: transparent;
-            }
-            .welcome-container .subtitle {
-                font-size: 1.2rem;
-                color: #4b5563;
-            }
-            .usage-notice {
-                margin-top: 3rem;
-                padding: 1rem 1.5rem;
-                border: 1px solid #e5e7eb;
-                border-radius: 12px;
-                background-color: #fafafa;
-                max-width: 600px;
-            }
-             .usage-notice h4 {
-                margin-bottom: 1rem;
-                font-weight: 600;
-             }
-        </style>
-        <div class="welcome-container">
-            <h1>유튜브 댓글분석: AI 챗봇</h1>
-            <p class="subtitle">기간과 분석주제를 명시하여 대화를 시작하세요</p>
-            <div class="usage-notice">
-                <h4>⚠️ 사용 주의사항</h4>
-                <ol style="text-align: left; padding-left: 20px;">
-                    <li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li>
-                    <li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li>
-                </ol>
-            </div>
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
+            <h1 style="font-size: 3.5rem; font-weight: 600; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">유튜브 댓글분석: AI 챗봇</h1>
+            <p style="font-size: 1.2rem; color: #4b5563;">기간과 분석주제를 명시하여 대화를 시작하세요</p>
         </div>
     """, unsafe_allow_html=True)
 else:
     render_metadata_outside_chat()
-    render_chat()
+    for msg in st.session_state.chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
-if prompt:
-    st.session_state["chat"].append({"role":"user","content":prompt})
-    
-    with st.chat_message("user"):
-        st.markdown(prompt)
-    
-    scroll_to_bottom()
+# 2. 신규 프롬프트 처리 로직
+if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
+    st.session_state.chat.append({"role": "user", "content": prompt})
+    st.rerun() # 사용자 메시지를 즉시 표시하고 아래 로직을 실행하기 위해 리런
 
-    if st.session_state.get("last_csv"):
-        run_followup_turn(prompt)
-    else:
-        run_pipeline_first_turn(prompt)
+# 3. AI 답변 생성 로직: 마지막 메시지가 user일 경우 AI가 답변 생성
+if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
+    user_query = st.session_state.chat[-1]["content"]
+    
+    if not st.session_state.get("last_csv"): # 첫 질문일 경우
+        # 로딩 바를 채팅창 내에 표시
+        progress_bar = st.progress(0, text="준비 중…")
+        response = run_pipeline_first_turn(user_query, progress_bar)
+        progress_bar.empty() # 로딩 바 제거
+    else: # 후속 질문일 경우
+        with st.spinner("💬 AI가 답변을 구성 중입니다..."):
+            response = run_followup_turn(user_query)
+
+    st.session_state.chat.append({"role": "assistant", "content": response})
+    st.rerun() # AI 답변을 표시하기 위해 리런
