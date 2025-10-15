@@ -19,22 +19,26 @@ from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
 # 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
-st.set_page_config(page_title="###💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="YTCC: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
 # 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
 .main .block-container {
-    padding-top: 2rem; /* 위쪽 패딩만 조금 남기고 */
+    padding-top: 2rem;
     padding-right: 1rem;
     padding-left: 1rem;
-    padding-bottom: 0rem; /* 아래쪽 패딩 제거 */
+    padding-bottom: 0rem;
 }
 /* 채팅 입력창이 고정될 수 있도록 여백 조정 */
 [data-testid="stSidebarContent"] {
-    padding-top: 1rem;
+    padding-top: 1.5rem;
 }
+/* Streamlit 기본 헤더 및 푸터 숨기기 (더 깔끔한 UI를 위해) */
+header {visibility: hidden;}
+footer {visibility: hidden;}
+#MainMenu {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -77,110 +81,56 @@ def ensure_state():
         if k not in st.session_state: st.session_state[k] = v
 ensure_state()
 
-# 대신, st.sidebar에 작은 제목과 설명을 넣어 채팅 영역을 최대한 확보합니다.
+# -------------------- [UI수정] 사이드바 --------------------
 with st.sidebar:
-    st.markdown("## 💬 유튜브 댓글 분석 챗봇")
-    
-    # 4. 좌측 사이드바에 설명 문구 수정 반영
-    st.info("""
-    **유튜브 댓글 분석 챗봇입니다.**
-    
-    1. **첫 질문 시** 댓글 수집 및 AI 분석에 다소 시간이 소요됩니다.
-    2. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
-    """)
-    
-    # -------------------- CSV 다운로드 기능 추가 --------------------
-    csv_path = st.session_state.get("last_csv")
-    df_videos = st.session_state.get("last_df")
-    download_section_shown = False
+    # CSS를 주입하여 '새 채팅' 버튼을 상단에, '문의' 정보를 하단에 고정
+    st.markdown("""
+    <style>
+        [data-testid="stSidebarUserContent"] {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 4rem); /* 전체 뷰포트 높이에서 상단 패딩 제외 */
+        }
+        .contact-info {
+            margin-top: auto; /* 이 요소가 남은 공간을 모두 차지하여 맨 아래로 밀려남 */
+        }
+    </style>
+    """, unsafe_allow_html=True)
 
-    # 1. 댓글 데이터 다운로드
-    if csv_path and os.path.exists(csv_path):
-        try:
-            with open(csv_path, "rb") as f:
-                csv_data = f.read()
-            
-            # 파일 이름 생성 (키워드 또는 기본값)
-            keywords = st.session_state.get("last_keywords", ["data"])
-            keywords_str = "_".join([k for k in keywords if k]).replace(" ", "_") or "data"
-            file_name = f"youtube_comments_{keywords_str}_{now_kst().strftime('%Y%m%d_%H%M%S')}.csv"
-
-            st.markdown("---")
-            st.download_button(
-                label="⬇️ 댓글 데이터 다운로드",
-                data=csv_data,
-                file_name=file_name,
-                mime="text/csv",
-                key="download_comment_csv_button",
-                type="primary"
-            )
-            download_section_shown = True
-        except Exception:
-            st.warning("다운로드할 댓글 CSV 파일을 읽는 데 실패했습니다.")
-
-    # 2. 영상 데이터 다운로드 (수정: 한글 깨짐 방지용 utf-8-sig 인코딩 적용)
-    if df_videos is not None and not df_videos.empty:
-        try:
-            # ****************** 2. 영상 데이터 한글 깨짐 수정 ******************
-            # BytesIO를 사용하여 Pandas가 BOM을 포함한 UTF-8-SIG 바이트를 정확히 생성하도록 수정
-            buffer = io.BytesIO()
-            df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
-            video_csv_data = buffer.getvalue()
-            # ******************************************************************
-            
-            # 파일 이름 생성
-            keywords = st.session_state.get("last_keywords", ["data"])
-            keywords_str = "_".join([k for k in keywords if k]).replace(" ", "_") or "data"
-            video_file_name = f"youtube_videos_{keywords_str}_{now_kst().strftime('%Y%m%d_%H%M%S')}.csv"
-
-            if not download_section_shown: # 댓글 다운로드 섹션이 없었으면 구분선 추가
-                 st.markdown("---") 
-
-            st.download_button(
-                label="🎬 영상 리스트 다운로드",
-                data=video_csv_data,
-                file_name=video_file_name,
-                mime="text/csv",
-                key="download_video_csv_button",
-                type="secondary"
-            )
-            download_section_shown = True
-        except Exception:
-            st.warning("다운로드할 영상 데이터 파일을 준비하는 데 실패했습니다.")
-            
-    if download_section_shown:
-        st.markdown("---")
-        
-    if st.button("🔄 초기화", type="secondary"):
+    # 3. '새 채팅' 버튼 (세련된 디자인, 최상단 배치)
+    if st.button("✨ 새 채팅", use_container_width=True, type="secondary"):
         st.session_state.clear()
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
 
-    # ****************** 문의 정보 추가 (1. 볼드 제거 반영) ******************
-    st.markdown("---")
-    st.markdown("### 📞 문의")
-    st.markdown("미디어)디지털마케팅 데이터파트 김호범")
+    # 2. 사이드바 정리: 다운로드 버튼 등 제거됨
+
+    # 4. 문의처 (최하단 고정)
+    st.markdown("""
+    <div class="contact-info">
+        <hr>
+        <h3>📞 문의</h3>
+        <p>미디어)디지털마케팅 데이터파트 김호범</p>
+    </div>
+    """, unsafe_allow_html=True)
 
 
+# -------------------- 로직 (수정 없음) --------------------
 def safe_rerun():
     fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
     if callable(fn): fn()
 
 def scroll_to_bottom():
-    # 항상 화면 가장 아래로 스크롤
     st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
-    
-# ****************** 3. 분석 메타데이터 채팅창 밖으로 분리 ******************
+
 def render_metadata_outside_chat():
-    """분석된 키워드와 기간을 채팅창 밖 상단에 표시"""
     if not st.session_state.get("last_schema"): return
-    
+
     schema = st.session_state["last_schema"]
     kw_main  = schema.get("keywords", [])
     start_iso = schema['start_iso']
     end_iso = schema['end_iso']
-    
-    # ISO 8601 시간을 KST로 파싱하여 YYYY-MM-DD HH:MM 형식으로 변환 (사용자에게 친숙하게)
+
     try:
         start_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
         end_dt_str = datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
@@ -196,9 +146,7 @@ def render_metadata_outside_chat():
         f"</div>"
     )
     st.markdown(metadata_html, unsafe_allow_html=True)
-# **************************************************************************
 
-# -------------------- 키 로테이터 / 유튜브 --------------------
 class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
@@ -236,7 +184,6 @@ class RotatingYouTube:
                 return factory(self.service).execute()
             raise
 
-# -------------------- 해석 프롬프트/파서 --------------------
 LIGHT_PROMPT = (
     "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
     "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
@@ -318,7 +265,6 @@ def parse_light_block_to_schema(light_text: str) -> dict:
 
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
-# -------------------- YouTube API --------------------
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
     while len(video_ids) < max_results:
@@ -439,12 +385,11 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
                 pass
             done += 1
             if prog:
-                frac = 0.50 + (done/total_videos) * 0.40  # 0.50→0.90
+                frac = 0.50 + (done/total_videos) * 0.40
                 prog.progress(min(0.90, frac), text="댓글 수집중…")
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-# -------------------- LLM 직렬화 --------------------
 def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars_per_comment=280, max_total_chars=420_000):
     if not csv_path or not os.path.exists(csv_path): return "", 0, 0
     lines, total = [], 0; remaining = max_rows
@@ -463,21 +408,18 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars
         if remaining <= 0 or total >= max_total_chars: break
     return "\n".join(lines), len(lines), total
 
-# -------------------- 응답 정리(핵심만) --------------------
-TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")  # #, ##, ### ... 로 시작하는 제목 제거
-HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)  # 흔한 제목 라인 제거
+TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")
+HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
 
 def tidy_answer(md: str) -> str:
-    """제목/장식/중복 메타 느낌의 라인을 정리해서 핵심만 남김."""
     if not md: return md
     lines = []
     for line in md.splitlines():
-        if TITLE_LINE_RE.match(line):    # 마크다운 제목 제거
+        if TITLE_LINE_RE.match(line):
             continue
-        if HEADER_DUP_RE.search(line):   # '유튜브 댓글 분석: ...' 같은 커스텀 헤더 제거
+        if HEADER_DUP_RE.search(line):
             continue
         lines.append(line)
-    # 연속 공백 라인 정리
     cleaned = []
     prev_blank = False
     for l in lines:
@@ -489,30 +431,25 @@ def tidy_answer(md: str) -> str:
         cleaned.append(l)
     return "\n".join(cleaned).strip()
 
-# -------------------- 렌더 --------------------
 def render_chat():
     for m in st.session_state["chat"]:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-# -------------------- 파이프라인 (첫 질문) --------------------
 def run_pipeline_first_turn(user_query: str):
-    # 단일 진행바: 파싱(0.1) → 영상(0.4) → 댓글(≤0.9) → AI(1.0)
     prog = st.progress(0.0, text="해석중…")
-    # 1) 해석
     if not GEMINI_API_KEYS:
         with st.chat_message("assistant"): st.markdown("Gemini API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료"); # prog.empty()
+        prog.progress(1.0, text="완료");
         return
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
                                  timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
     schema = parse_light_block_to_schema(light)
     prog.progress(0.10, text="영상 수집중…")
 
-    # 2) 검색
     if not YT_API_KEYS:
         with st.chat_message("assistant"): st.markdown("YouTube API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료"); # prog.empty()
+        prog.progress(1.0, text="완료");
         return
     start_dt = datetime.fromisoformat(schema["start_iso"]).astimezone(KST)
     end_dt   = datetime.fromisoformat(schema["end_iso"]).astimezone(KST)
@@ -531,7 +468,6 @@ def run_pipeline_first_turn(user_query: str):
     all_ids = list(dict.fromkeys(all_ids))
     prog.progress(0.40, text="댓글 수집중…")
 
-    # 3) 댓글 수집(스트리밍)
     stats = yt_video_statistics(rt, all_ids)
     df_stats = pd.DataFrame(stats)
     csv_path, total_cnt = parallel_collect_comments_streaming(
@@ -550,11 +486,8 @@ def run_pipeline_first_turn(user_query: str):
         scroll_to_bottom()
         return
 
-    # 4) AI 요약
     prog.progress(0.90, text="AI 분석중…")
-    # ****************** 캐시 데이터 생성 ******************
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
-    # ****************************************************
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
            "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
            "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
@@ -568,38 +501,28 @@ def run_pipeline_first_turn(user_query: str):
                                          timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
     answer_md = tidy_answer(answer_md_raw)
     prog.progress(1.0, text="완료")
-    # prog.empty() # 진행바 제거 로직 제거
 
-    # ****************** 상태 저장 (캐시) ******************
     st.session_state["last_schema"]   = schema
     st.session_state["last_csv"]      = csv_path
-    st.session_state["last_df"]       = df_stats # 영상 데이터프레임 저장
-    st.session_state["sample_text"]   = sample_text # 댓글 샘플 텍스트 캐시
+    st.session_state["last_df"]       = df_stats
+    st.session_state["sample_text"]   = sample_text
     st.session_state["last_keywords"] = kw_main
     st.session_state["last_entities"] = kw_ent
     st.session_state["last_period"]   = (schema["start_iso"], schema["end_iso"])
-    # ****************************************************
 
-    # ****************** 3. 메타데이터 채팅창 표시 로직 제거 ******************
     with st.chat_message("assistant"):
         st.markdown(answer_md)
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
-    # **************************************************************************
 
     scroll_to_bottom()
-    # CSV 다운로드 버튼을 활성화하기 위해 리런 (사이드바 및 메타데이터 영역 업데이트)
-    safe_rerun() 
+    safe_rerun()
 
-# -------------------- 후속 질문 (재수집 없음) --------------------
 def run_followup_turn(user_query: str):
     schema = st.session_state.get("last_schema") or {}
-    # ****************** 캐시된 댓글 샘플 사용 ******************
     sample_text = st.session_state.get("sample_text","")
 
-    # 최근 대화문맥
     lines = []
     for m in st.session_state["chat"][-10:]:
-        # HTML 태그 제거 및 내용만 추출 (메타 정보가 포함된 경우)
         content_text = re.sub(r'<div.*?/div>', '', m['content'], flags=re.DOTALL).strip()
         if m["role"] == "user": lines.append(f"[이전 Q]: {content_text}")
         else:                   lines.append(f"[이전 A]: {content_text}")
@@ -613,10 +536,9 @@ def run_followup_turn(user_query: str):
         context + "\n\n" +
         f"[현재 질문]: {user_query}\n"
         f"[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n" # 캐시된 텍스트 사용
+        f"[댓글 샘플]:\n{sample_text}\n"
     )
 
-    # 요청하신 대로 st.progress 대신 st.spinner로 대체하여 로딩 표시
     with st.spinner("💬 AI가 답변을 구성 중입니다..."):
         answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload,
                                              timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
@@ -624,42 +546,82 @@ def run_followup_turn(user_query: str):
     answer_md = tidy_answer(answer_md_raw)
 
     with st.chat_message("assistant"):
-        # 후속부터는 메타 반복 X
         st.markdown(answer_md)
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
     scroll_to_bottom()
 
-# -------------------- 채팅 표시 & 입력 --------------------
-# ****************** 3. 메타데이터 채팅창 밖으로 분리 후 렌더링 ******************
-render_metadata_outside_chat()
-# **************************************************************************
+# -------------------- [UI수정] 메인 화면 --------------------
 
-# 초기 화면 안내 메시지 추가 (요청 사항)
+# 5. 초기 화면과 채팅 화면 분리 (Gemini 스타일)
 if not st.session_state["chat"]:
+    # 1. 제미나이 스타일 초기 화면 구성
     st.markdown("""
-    ## 💬 분석을 시작하려면 질문을 입력하세요.
-    **기간**과 **키워드**(인물/배우/IP 등)를 명시하여 분석을 시작할 수 있습니다.
-    
-    > **💡 예시 1:** `최근 24시간 태풍상사 반응`
-    > **💡 예시 2:** `5월 10일부터 지금까지 이준호 반응`
-    """)
+        <style>
+            .welcome-container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                height: 70vh;
+            }
+            .welcome-container h1 {
+                font-size: 3.5rem;
+                font-weight: 600;
+                background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+            }
+            .welcome-container .subtitle {
+                font-size: 1.2rem;
+                color: #4b5563;
+            }
+            .usage-notice {
+                margin-top: 3rem;
+                padding: 1rem 1.5rem;
+                border: 1px solid #e5e7eb;
+                border-radius: 12px;
+                background-color: #fafafa;
+                max-width: 600px;
+            }
+             .usage-notice h4 {
+                margin-bottom: 1rem;
+                font-weight: 600;
+             }
+        </style>
+        <div class="welcome-container">
+            <h1>YTCC: 챗봇</h1>
+            <p class="subtitle">유튜브 댓글 분석 AI 챗봇</p>
+            <div class="usage-notice">
+                <h4>⚠️ 사용 주의사항</h4>
+                <ol style="text-align: left; padding-left: 20px;">
+                    <li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li>
+                    <li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li>
+                </ol>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+else:
+    # 채팅이 시작되면 기존 채팅 화면을 렌더링
+    render_metadata_outside_chat()
+    render_chat()
 
-
-# 채팅 기록을 표시
-render_chat()
-
-# 챗봇 입력창 (Streamlit 기본 기능으로 하단에 고정됨)
+# 채팅 입력창 (Streamlit 기본 기능으로 하단에 고정됨)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
 if prompt:
+    # 채팅 시작 시, 이전의 초기화면 안내 메시지 등은 rerun 시 사라짐
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+
     st.session_state["chat"].append({"role":"user","content":prompt})
-    # 사용자 질문을 즉시 화면에 표시하고
-    with st.chat_message("user"): st.markdown(prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+    
+    # safe_rerun() 대신 scroll_to_bottom() 호출하여 즉시 스크롤
     scroll_to_bottom()
 
     # 파이프라인 실행
     if st.session_state.get("last_csv"):
-        # 후속질문: 재수집 없음 (캐시 사용)
         run_followup_turn(prompt)
     else:
-        # 첫 질문: 파이프라인 전체 (캐시 생성)
         run_pipeline_first_turn(prompt)
