@@ -84,17 +84,16 @@ st.markdown("""
         text-overflow: ellipsis;
         display: block;
     }
-    
-    /* [수정] 새 채팅 버튼 스타일 (더 구체적인 선택자 사용) */
-    [data-testid="stSidebar"] .stButton:first-of-type button {
-        background-color: #E6F0FF; /* 옅은 하늘색 배경 */
-        color: #0052CC; /* 선명한 파란색 텍스트 */
-        border: 1px solid #B3D4FF !important;
+    /* 새 채팅 버튼 스타일 */
+    .new-chat-btn button {
+        background-color: #e8f0fe;
+        color: #0052CC !important;; /* 선명한 파란색 텍스트 */
+        border: 1px solid #d2e3fc !important;
     }
-    [data-testid="stSidebar"] .stButton:first-of-type button:hover {
-        background-color: #CCE0FF; /* 마우스를 올렸을 때 살짝 더 진한 배경 */
-        color: #0041A3; /* 더 진한 파란색 텍스트 */
-        border: 1px solid #99C2FF !important;
+    .new-chat-btn button:hover {
+        background-color: #d2e3fc;
+        olor: #0041A3 !important;; /* 더 진한 파란색 텍스트 *
+        border: 1px solid #c2d8f8 !important;
     }
 </style>
 """, unsafe_allow_html=True)
