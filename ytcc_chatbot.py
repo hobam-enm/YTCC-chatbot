@@ -38,7 +38,7 @@ footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 
 /* 채팅 메시지 기본 스타일 */
-.stChatMessage {
+[data-testid="stChatMessage"] {
     width: fit-content;
     max-width: 80%;
     margin-bottom: 1rem;
@@ -48,33 +48,35 @@ footer {visibility: hidden;}
 }
 
 /* AI 답변 (assistant) 스타일 */
-.st-emotion-cache-janbn0 { /* Streamlit의 AI 메시지 컨테이너 클래스 타겟 */
-    background-color: #f7f7f8;
-    border: 1px solid #e5e7eb; /* 테두리 명확화 */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
+    background-color: #f0f2f6; /* 옅은 회색으로 변경 */
+    border: 1px solid #d1d5db;
 }
 
 /* AI 답변 내부 텍스트 스타일 (글꼴 크기 줄이기) */
-.st-emotion-cache-janbn0 p,
-.st-emotion-cache-janbn0 li,
-.st-emotion-cache-janbn0 ol,
-.st-emotion-cache-janbn0 ul,
-.st-emotion-cache-janbn0 code {
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ol,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ul,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) code {
     font-size: 0.9rem; /* 글꼴 크기 더 작게 */
     color: #202123;
 }
 
 /* 사용자 질문 (user) 스타일 */
-.st-emotion-cache-4oy321 { /* Streamlit의 사용자 메시지 컨테이너 클래스 타겟 */
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
     background-color: #0084ff;
+    color: white;
     margin-left: auto; /* 우측 정렬 */
 }
 /* 사용자 메시지 내부 텍스트 색상 */
-.st-emotion-cache-4oy321 p,
-.st-emotion-cache-4oy321 li {
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) p,
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) li {
     color: white;
 }
 </style>
 """, unsafe_allow_html=True)
+
 
 BASE_DIR = "/tmp"; os.makedirs(BASE_DIR, exist_ok=True)
 KST = timezone(timedelta(hours=9))
@@ -152,7 +154,8 @@ def render_metadata_outside_chat():
         start_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
         end_dt_str = datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
     except (ValueError, TypeError):
-        start_dt_str, end_dt_str = start_iso.split('T')[0], end_iso.split('T')[0]
+        start_dt_str = start_iso.split('T')[0] if start_iso else ""
+        end_dt_str = end_iso.split('T')[0] if end_iso else ""
     metadata_html = (
         f"<div style='font-size:14px; color:#4b5563; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; margin-bottom:1rem; background-color: #f9fafb;'>"
         f"**📊 현재 분석 컨텍스트:**<br>"
@@ -322,7 +325,7 @@ def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_repl
         time.sleep(0.2)
     return rows[:max_per_video] if max_per_video is not None else rows
 
-def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar): # [수정] progress_bar 객체 받기
+def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar): # ... (수정 없음)
     out_csv = os.path.join(BASE_DIR, f"collect_{uuid4().hex}.csv")
     wrote_header = False; total_written = 0
     total_videos = len(video_list); done = 0
@@ -360,6 +363,10 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=28
         lines.append(line); total_chars += len(line) + 1
     return "\n".join(lines), len(lines), total_chars
 
+# [오류 수정] NameError 해결을 위해 전역 범위에 변수 정의
+TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")
+HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
+
 def tidy_answer(md: str) -> str: # ... (수정 없음)
     if not md: return md
     lines = [line for line in md.splitlines() if not (TITLE_LINE_RE.match(line) or HEADER_DUP_RE.search(line))]
@@ -371,7 +378,7 @@ def tidy_answer(md: str) -> str: # ... (수정 없음)
         prev_blank = is_blank
     return "\n".join(cleaned).strip()
 
-def run_pipeline_first_turn(user_query: str, prog_bar) -> str: # [수정] progress_bar 객체 받고, 답변 문자열 리턴
+def run_pipeline_first_turn(user_query: str, prog_bar): # ... (수정 없음)
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
     prog_bar.progress(0.05, text="해석중…")
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
@@ -401,10 +408,10 @@ def run_pipeline_first_turn(user_query: str, prog_bar) -> str: # [수정] progre
     payload = f"[키워드]: {', '.join(kw_main)}\n[엔티티]: {', '.join(kw_ent)}\n[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n[댓글 샘플]:\n{sample_text}\n"
     answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
     prog_bar.progress(1.0, text="완료")
-    time.sleep(0.5) # 사용자가 '완료' 메시지를 볼 수 있도록 잠시 대기
+    time.sleep(0.5)
     return tidy_answer(answer_md_raw)
 
-def run_followup_turn(user_query: str) -> str: # [수정] 답변 문자열 리턴
+def run_followup_turn(user_query: str): # ... (수정 없음)
     if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
     sample_text = st.session_state.get("sample_text","")
     context = "\n".join(f"[이전 {'Q' if m['role']=='user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
@@ -420,6 +427,14 @@ if not st.session_state.chat:
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
             <h1 style="font-size: 3.5rem; font-weight: 600; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">유튜브 댓글분석: AI 챗봇</h1>
             <p style="font-size: 1.2rem; color: #4b5563;">기간과 분석주제를 명시하여 대화를 시작하세요</p>
+            
+            <div style="margin-top: 3rem; padding: 1rem 1.5rem; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #fafafa; max-width: 600px;">
+                <h4 style="margin-bottom: 1rem; font-weight: 600;">⚠️ 사용 주의사항</h4>
+                <ol style="text-align: left; padding-left: 20px;">
+                    <li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li>
+                    <li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li>
+                </ol>
+            </div>
         </div>
     """, unsafe_allow_html=True)
 else:
@@ -431,20 +446,25 @@ else:
 # 2. 신규 프롬프트 처리 로직
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
     st.session_state.chat.append({"role": "user", "content": prompt})
-    st.rerun() # 사용자 메시지를 즉시 표시하고 아래 로직을 실행하기 위해 리런
+    st.rerun()
 
-# 3. AI 답변 생성 로직: 마지막 메시지가 user일 경우 AI가 답변 생성
+# 3. AI 답변 생성 로직
 if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
     user_query = st.session_state.chat[-1]["content"]
     
-    if not st.session_state.get("last_csv"): # 첫 질문일 경우
-        # 로딩 바를 채팅창 내에 표시
-        progress_bar = st.progress(0, text="준비 중…")
-        response = run_pipeline_first_turn(user_query, progress_bar)
-        progress_bar.empty() # 로딩 바 제거
-    else: # 후속 질문일 경우
-        with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-            response = run_followup_turn(user_query)
+    with st.chat_message("assistant"):
+        # 컨테이너를 만들어 AI 답변과 로딩바/스피너를 같은 위치에 표시
+        container = st.empty()
+        
+        if not st.session_state.get("last_csv"): # 첫 질문
+            progress_bar = container.progress(0, text="준비 중…")
+            response = run_pipeline_first_turn(user_query, progress_bar)
+            container.markdown(response) # 로딩바 위치에 답변을 채움
+        else: # 후속 질문
+            with container:
+                with st.spinner("💬 AI가 답변을 구성 중입니다..."):
+                    response = run_followup_turn(user_query)
+            container.markdown(response)
 
     st.session_state.chat.append({"role": "assistant", "content": response})
-    st.rerun() # AI 답변을 표시하기 위해 리런
+    st.rerun()
