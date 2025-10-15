@@ -47,7 +47,7 @@ footer {visibility: hidden;}
 /* AI 답변 폰트 크기 조정 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
-    font-size: 0.95rem;
+    font-size: 0.8rem;
 }
 /* 다운로드 버튼을 텍스트 링크처럼 보이게 스타일링 */
 .stDownloadButton button {
