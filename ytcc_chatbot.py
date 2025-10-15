@@ -33,6 +33,18 @@ header {visibility: hidden;}
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 
+/* --- [추가] 사이드바 너비 고정 --- */
+[data-testid="stSidebar"] {
+    width: 350px !important;
+    min-width: 350px !important;
+    max-width: 350px !important;
+}
+/* --- [추가] 사이드바 리사이즈 핸들 숨기기 --- */
+[data-testid="stSidebar"] + div[class*="resizer"] {
+    display: none;
+}
+/* --- --- */
+
 /* AI 답변 폰트 크기 조정 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
