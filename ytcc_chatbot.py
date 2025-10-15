@@ -74,7 +74,7 @@ footer {visibility: hidden;}
 }
 /* 새 채팅 버튼 스타일 */
 .new-chat-btn button {
-    background-color: #e8f0fe;
+    background-color: #0057E7;
     color: #1967d2;
     border: 1px solid #d2e3fc !important;
 }
