@@ -29,11 +29,11 @@ st.markdown("""
     padding-top: 2rem;
     padding-right: 1rem;
     padding-left: 1rem;
-    padding-bottom: 0rem;
+    padding-bottom: 10rem;
 }
 /* 채팅 입력창이 고정될 수 있도록 여백 조정 */
 [data-testid="stSidebarContent"] {
-    padding-top: 10.5rem;
+    padding-top: 1.5rem;
 }
 /* Streamlit 기본 헤더 및 푸터 숨기기 (더 깔끔한 UI를 위해) */
 header {visibility: hidden;}
@@ -590,8 +590,8 @@ if not st.session_state["chat"]:
              }
         </style>
         <div class="welcome-container">
-            <h1>YTCC: 챗봇</h1>
-            <p class="subtitle">유튜브 댓글 분석 AI 챗봇</p>
+            <h1>유튜브 댓글분석: AI 챗봇</h1>
+            <p class="subtitle">기간과 분석주제를 명시하여 대화를 시작하세요</p>
             <div class="usage-notice">
                 <h4>⚠️ 사용 주의사항</h4>
                 <ol style="text-align: left; padding-left: 20px;">
