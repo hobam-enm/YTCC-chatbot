@@ -76,12 +76,13 @@ def ensure_state():
         last_entities=[],        # list[str]
         last_period=("", ""),    # (start_iso, end_iso)
         sample_text="",          # LLM sample text
+        init_done=False,         # [추가] 초기 로딩 스피너 상태
     )
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 ensure_state()
 
-# -------------------- [UI수정] 사이드바 --------------------
+# -------------------- 사이드바 (수정 없음) --------------------
 with st.sidebar:
     # CSS를 주입하여 '새 채팅' 버튼을 상단에, '문의' 정보를 하단에 고정
     st.markdown("""
@@ -97,15 +98,11 @@ with st.sidebar:
     </style>
     """, unsafe_allow_html=True)
 
-    # 3. '새 채팅' 버튼 (세련된 디자인, 최상단 배치)
     if st.button("✨ 새 채팅", use_container_width=True, type="secondary"):
         st.session_state.clear()
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
 
-    # 2. 사이드바 정리: 다운로드 버튼 등 제거됨
-
-    # 4. 문의처 (최하단 고정)
     st.markdown("""
     <div class="contact-info">
         <hr>
@@ -552,49 +549,88 @@ def run_followup_turn(user_query: str):
 
 # -------------------- [UI수정] 메인 화면 --------------------
 
-# 5. 초기 화면과 채팅 화면 분리 (Gemini 스타일)
+# [추가] 첫 로딩 시 스피너 표시
+if not st.session_state.init_done:
+    # 화면 중앙에 스피너를 표시하기 위한 컨테이너
+    with st.container():
+        st.markdown("<div style='height: 40vh;'></div>", unsafe_allow_html=True) # 수직 중앙 정렬을 위한 공간
+        with st.spinner("로딩 중..."):
+            time.sleep(1.5) # 초기 로딩 시뮬레이션
+    st.session_state.init_done = True
+    st.rerun()
+
+
+# 채팅 시작 여부에 따라 화면 분기
 if not st.session_state["chat"]:
-    # 1. 제미나이 스타일 초기 화면 구성
+    # [수정] Gemini 스타일 초기 화면 (입력창 중앙, 주의사항 하단)
     st.markdown("""
         <style>
-            .welcome-container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                height: 70vh;
+            /* 메인 콘텐츠 영역의 하단 패딩 제거 (초기화면 전용) */
+            .main .block-container {
+                padding-bottom: 0rem !important;
             }
-            .welcome-container h1 {
+            .welcome-title {
+                position: absolute;
+                top: 35%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                text-align: center;
+                width: 100%;
+            }
+            .welcome-title h1 {
                 font-size: 3.5rem;
                 font-weight: 600;
                 background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C);
                 -webkit-background-clip: text;
                 -webkit-text-fill-color: transparent;
             }
-            .welcome-container .subtitle {
+            .welcome-title .subtitle {
                 font-size: 1.2rem;
                 color: #4b5563;
+                margin-top: 0.5rem;
             }
-            .usage-notice {
-                margin-top: 3rem;
+            /* 채팅 입력창을 화면 중앙으로 이동 */
+            [data-testid="stChatInputContainer"] {
+                position: fixed;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+            .usage-notice-container {
+                position: absolute;
+                top: calc(50% + 80px); /* 입력창 아래에 위치하도록 조정 */
+                left: 50%;
+                transform: translateX(-50%);
+                width: 100%;
+                max-width: 740px; /* 박스 폭 넓게 */
+            }
+            .usage-notice-box {
                 padding: 1rem 1.5rem;
                 border: 1px solid #e5e7eb;
                 border-radius: 12px;
                 background-color: #fafafa;
-                max-width: 600px;
+                margin: 0 auto;
             }
-             .usage-notice h4 {
+            .usage-notice-box h4 {
                 margin-bottom: 1rem;
                 font-weight: 600;
-             }
+            }
+            .usage-notice-box ol {
+                text-align: left;
+                padding-left: 20px;
+                font-size: 0.9rem; /* 글씨 크기 줄임 */
+                margin-bottom: 0;
+            }
         </style>
-        <div class="welcome-container">
+        
+        <div class="welcome-title">
             <h1>유튜브 댓글분석: AI 챗봇</h1>
             <p class="subtitle">기간과 분석주제를 명시하여 대화를 시작하세요</p>
-            <div class="usage-notice">
+        </div>
+        
+        <div class="usage-notice-container">
+            <div class="usage-notice-box">
                 <h4>⚠️ 사용 주의사항</h4>
-                <ol style="text-align: left; padding-left: 20px;">
+                <ol>
                     <li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li>
                     <li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li>
                 </ol>
@@ -606,22 +642,22 @@ else:
     render_metadata_outside_chat()
     render_chat()
 
-# 채팅 입력창 (Streamlit 기본 기능으로 하단에 고정됨)
+# 채팅 입력창 (항상 페이지 하단에 렌더링되지만, CSS에 의해 위치가 제어됨)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
 if prompt:
-    # 채팅 시작 시, 이전의 초기화면 안내 메시지 등은 rerun 시 사라짐
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
-
     st.session_state["chat"].append({"role":"user","content":prompt})
+    
+    # 첫 질문 입력 시, rerun을 통해 초기화면 요소를 지우고 채팅 화면으로 전환
+    if len(st.session_state["chat"]) == 1:
+        st.rerun()
+
     with st.chat_message("user"):
         st.markdown(prompt)
     
-    # safe_rerun() 대신 scroll_to_bottom() 호출하여 즉시 스크롤
     scroll_to_bottom()
 
     # 파이프라인 실행
-    if st.session_state.get("last_csv"):
+    if len(st.session_state.get("last_csv", "")) > 0:
         run_followup_turn(prompt)
     else:
         run_pipeline_first_turn(prompt)
