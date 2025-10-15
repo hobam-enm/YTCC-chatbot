@@ -19,7 +19,7 @@ from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
 # 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
-st.set_page_config(page_title="YTCC: 챗봇", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
 # 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
 st.markdown("""
@@ -33,7 +33,7 @@ st.markdown("""
 }
 /* 채팅 입력창이 고정될 수 있도록 여백 조정 */
 [data-testid="stSidebarContent"] {
-    padding-top: 1.5rem;
+    padding-top: 10.5rem;
 }
 /* Streamlit 기본 헤더 및 푸터 숨기기 (더 깔끔한 UI를 위해) */
 header {visibility: hidden;}
