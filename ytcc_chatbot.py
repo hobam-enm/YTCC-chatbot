@@ -20,7 +20,7 @@ from streamlit.components.v1 import html as st_html
 # -------------------- 페이지/전역 --------------------
 st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# [수정] 챗봇 UI 스타일 (AI 답변 박스, 글꼴 크기, 사용자 질문 우측 정렬)
+# [수정] 챗봇 UI 스타일
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -28,7 +28,7 @@ st.markdown("""
     padding-top: 2rem;
     padding-right: 1rem;
     padding-left: 1rem;
-    padding-bottom: 5rem; /* 입력창과의 거리 확보 */
+    padding-bottom: 5rem;
 }
 [data-testid="stSidebarContent"] {
     padding-top: 1.5rem;
@@ -40,7 +40,7 @@ footer {visibility: hidden;}
 /* 채팅 메시지 기본 스타일 */
 [data-testid="stChatMessage"] {
     width: fit-content;
-    max-width: 80%;
+    max-width: 90%; /* [수정] 너비 제한 확장 */
     margin-bottom: 1rem;
     padding: 0.8rem 1rem;
     border-radius: 18px;
@@ -49,17 +49,17 @@ footer {visibility: hidden;}
 
 /* AI 답변 (assistant) 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
-    background-color: #f0f2f6; /* 옅은 회색으로 변경 */
+    background-color: #f0f2f6;
     border: 1px solid #d1d5db;
 }
 
-/* AI 답변 내부 텍스트 스타일 (글꼴 크기 줄이기) */
+/* AI 답변 내부 텍스트 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ol,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ul,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) code {
-    font-size: 0.9rem; /* 글꼴 크기 더 작게 */
+    font-size: 0.9rem;
     color: #202123;
 }
 
@@ -67,9 +67,8 @@ footer {visibility: hidden;}
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
     background-color: #0084ff;
     color: white;
-    margin-left: auto; /* 우측 정렬 */
+    margin-left: auto;
 }
-/* 사용자 메시지 내부 텍스트 색상 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) p,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) li {
     color: white;
@@ -141,7 +140,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# -------------------- 로직 (일부 수정) --------------------
+# -------------------- 로직 (수정 없음) --------------------
 def scroll_to_bottom():
     st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
 
@@ -165,7 +164,7 @@ def render_metadata_outside_chat():
     )
     st.markdown(metadata_html, unsafe_allow_html=True)
 
-class RotatingKeys: # ... (수정 없음)
+class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
         self.state_key = state_key
@@ -181,7 +180,7 @@ class RotatingKeys: # ... (수정 없음)
         st.session_state[self.state_key] = self.idx
         if callable(self.on_rotate): self.on_rotate(self.idx, self.current())
 
-class RotatingYouTube: # ... (수정 없음)
+class RotatingYouTube:
     def __init__(self, keys, state_key="yt_key_idx"):
         self.rot = RotatingKeys(keys, state_key)
         self.service = None
@@ -218,11 +217,11 @@ LIGHT_PROMPT = (
     f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
 )
 
-def is_gemini_quota_error(exc: Exception) -> bool: # ... (수정 없음)
+def is_gemini_quota_error(exc: Exception) -> bool:
     msg = (str(exc) or "").lower()
     return ("429" in msg) or ("too many requests" in msg) or ("rate limit" in msg) or ("resource exhausted" in msg) or ("quota" in msg)
 
-def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str: # ... (수정 없음)
+def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
     attempts = 0
@@ -243,7 +242,7 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload, tim
                 rk.rotate(); attempts += 1; continue
             raise
 
-def parse_light_block_to_schema(light_text: str) -> dict: # ... (수정 없음)
+def parse_light_block_to_schema(light_text: str) -> dict:
     raw = (light_text or "").strip()
     m_time = re.search(r"기간\(KST\)\s*:\s*([^~]+)~\s*([^\n]+)", raw)
     start_iso = m_time.group(1).strip() if m_time else None
@@ -265,7 +264,7 @@ def parse_light_block_to_schema(light_text: str) -> dict: # ... (수정 없음)
     if not keywords: keywords = [m[0]] if (m := re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)) else ["유튜브"]
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
-def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None): # ... (수정 없음)
+def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
     while len(video_ids) < max_results:
         params = dict(q=keyword, part="id", type="video", order=order, maxResults=min(50, max_results - len(video_ids)))
@@ -279,7 +278,7 @@ def yt_search_videos(rt, keyword, max_results, order="relevance", published_afte
         time.sleep(0.25)
     return video_ids
 
-def yt_video_statistics(rt, video_ids): # ... (수정 없음)
+def yt_video_statistics(rt, video_ids):
     rows = []
     for i in range(0, len(video_ids), 50):
         batch = video_ids[i:i+50]
@@ -294,7 +293,7 @@ def yt_video_statistics(rt, video_ids): # ... (수정 없음)
         time.sleep(0.25)
     return rows
 
-def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None): # ... (수정 없음)
+def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=None):
     replies, token = [], None
     while not (cap is not None and len(replies) >= cap):
         try: resp = rt.execute(lambda s: s.comments().list(part="snippet", parentId=parent_id, maxResults=100, pageToken=token, textFormat="plainText"))
@@ -307,7 +306,7 @@ def yt_all_replies(rt, parent_id, video_id, title="", short_type="Clip", cap=Non
         time.sleep(0.2)
     return replies[:cap] if cap is not None else replies
 
-def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_replies=True, max_per_video=None): # ... (수정 없음)
+def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_replies=True, max_per_video=None):
     rows, token = [], None
     while not (max_per_video is not None and len(rows) >= max_per_video):
         try: resp = rt.execute(lambda s: s.commentThreads().list(part="snippet,replies", videoId=video_id, maxResults=100, pageToken=token, textFormat="plainText"))
@@ -325,7 +324,7 @@ def yt_all_comments_sync(rt, video_id, title="", short_type="Clip", include_repl
         time.sleep(0.2)
     return rows[:max_per_video] if max_per_video is not None else rows
 
-def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar): # ... (수정 없음)
+def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, max_total_comments, max_per_video, prog_bar):
     out_csv = os.path.join(BASE_DIR, f"collect_{uuid4().hex}.csv")
     wrote_header = False; total_written = 0
     total_videos = len(video_list); done = 0
@@ -344,7 +343,7 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000): # ... (수정 없음)
+def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=280, max_total_chars=420_000):
     if not os.path.exists(csv_path): return "", 0, 0
     try: df_all = pd.read_csv(csv_path)
     except Exception: return "", 0, 0
@@ -363,11 +362,10 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_chars_per_comment=28
         lines.append(line); total_chars += len(line) + 1
     return "\n".join(lines), len(lines), total_chars
 
-# [오류 수정] NameError 해결을 위해 전역 범위에 변수 정의
 TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")
 HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
 
-def tidy_answer(md: str) -> str: # ... (수정 없음)
+def tidy_answer(md: str) -> str:
     if not md: return md
     lines = [line for line in md.splitlines() if not (TITLE_LINE_RE.match(line) or HEADER_DUP_RE.search(line))]
     cleaned, prev_blank = [], False
@@ -378,7 +376,7 @@ def tidy_answer(md: str) -> str: # ... (수정 없음)
         prev_blank = is_blank
     return "\n".join(cleaned).strip()
 
-def run_pipeline_first_turn(user_query: str, prog_bar): # ... (수정 없음)
+def run_pipeline_first_turn(user_query: str, prog_bar):
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
     prog_bar.progress(0.05, text="해석중…")
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
@@ -411,7 +409,7 @@ def run_pipeline_first_turn(user_query: str, prog_bar): # ... (수정 없음)
     time.sleep(0.5)
     return tidy_answer(answer_md_raw)
 
-def run_followup_turn(user_query: str): # ... (수정 없음)
+def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
     sample_text = st.session_state.get("sample_text","")
     context = "\n".join(f"[이전 {'Q' if m['role']=='user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
@@ -421,13 +419,12 @@ def run_followup_turn(user_query: str): # ... (수정 없음)
 
 # -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
 
-# 1. 뷰 렌더링: 채팅 기록이 없으면 웰컴 화면, 있으면 채팅 화면 표시
+# 1. 뷰 렌더링: 이전 대화기록 표시
 if not st.session_state.chat:
     st.markdown("""
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
             <h1 style="font-size: 3.5rem; font-weight: 600; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">유튜브 댓글분석: AI 챗봇</h1>
             <p style="font-size: 1.2rem; color: #4b5563;">기간과 분석주제를 명시하여 대화를 시작하세요</p>
-            
             <div style="margin-top: 3rem; padding: 1rem 1.5rem; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #fafafa; max-width: 600px;">
                 <h4 style="margin-bottom: 1rem; font-weight: 600;">⚠️ 사용 주의사항</h4>
                 <ol style="text-align: left; padding-left: 20px;">
@@ -443,28 +440,23 @@ else:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-# 2. 신규 프롬프트 처리 로직
+# 2. 신규 프롬프트 처리
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
     st.session_state.chat.append({"role": "user", "content": prompt})
-    st.rerun()
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-# 3. AI 답변 생성 로직
-if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
-    user_query = st.session_state.chat[-1]["content"]
-    
     with st.chat_message("assistant"):
-        # 컨테이너를 만들어 AI 답변과 로딩바/스피너를 같은 위치에 표시
         container = st.empty()
-        
         if not st.session_state.get("last_csv"): # 첫 질문
             progress_bar = container.progress(0, text="준비 중…")
-            response = run_pipeline_first_turn(user_query, progress_bar)
-            container.markdown(response) # 로딩바 위치에 답변을 채움
+            response = run_pipeline_first_turn(prompt, progress_bar)
+            container.markdown(response)
         else: # 후속 질문
-            with container:
-                with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-                    response = run_followup_turn(user_query)
+            with container.spinner("💬 AI가 답변을 구성 중입니다..."):
+                response = run_followup_turn(prompt)
             container.markdown(response)
 
     st.session_state.chat.append({"role": "assistant", "content": response})
-    st.rerun()
+    time.sleep(0.1)
+    scroll_to_bottom()
