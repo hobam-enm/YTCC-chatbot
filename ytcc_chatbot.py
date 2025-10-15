@@ -56,7 +56,7 @@ footer {visibility: hidden;}
     border: none;
     padding: 0;
     text-decoration: underline;
-    font-size: 14px;
+    font-size: 10px;
     font-weight: normal;
 }
 .stDownloadButton button:hover {
