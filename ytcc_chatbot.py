@@ -17,7 +17,8 @@ import google.generativeai as genai
 from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
-st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="collapsed")
+# 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
+st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
 # 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
 st.markdown("""
@@ -82,6 +83,10 @@ with st.sidebar:
     
     # -------------------- CSV 다운로드 기능 추가 --------------------
     csv_path = st.session_state.get("last_csv")
+    df_videos = st.session_state.get("last_df")
+    download_section_shown = False
+
+    # 1. 댓글 데이터 다운로드
     if csv_path and os.path.exists(csv_path):
         try:
             with open(csv_path, "rb") as f:
@@ -98,12 +103,42 @@ with st.sidebar:
                 data=csv_data,
                 file_name=file_name,
                 mime="text/csv",
-                key="download_csv_button",
+                key="download_comment_csv_button",
                 type="primary"
             )
+            download_section_shown = True
         except Exception:
-            st.warning("다운로드할 CSV 파일을 읽는 데 실패했습니다.")
-    st.markdown("---")
+            st.warning("다운로드할 댓글 CSV 파일을 읽는 데 실패했습니다.")
+
+    # 2. 영상 데이터 다운로드 (추가 요청 사항)
+    if df_videos is not None and not df_videos.empty:
+        try:
+            # Pandas DataFrame을 CSV 문자열로 변환 (인코딩: utf-8-sig로 설정하여 엑셀에서 깨짐 방지)
+            video_csv_data = df_videos.to_csv(index=False, encoding="utf-8-sig").encode('utf-8')
+            
+            # 파일 이름 생성
+            keywords = st.session_state.get("last_keywords", ["data"])
+            keywords_str = "_".join([k for k in keywords if k]).replace(" ", "_") or "data"
+            video_file_name = f"youtube_videos_{keywords_str}_{now_kst().strftime('%Y%m%d_%H%M%S')}.csv"
+
+            if not download_section_shown: # 댓글 다운로드 섹션이 없었으면 구분선 추가
+                 st.markdown("---") 
+
+            st.download_button(
+                label="🎬 수집된 영상 메타데이터 (CSV) 다운로드",
+                data=video_csv_data,
+                file_name=video_file_name,
+                mime="text/csv",
+                key="download_video_csv_button",
+                type="secondary"
+            )
+            download_section_shown = True
+        except Exception:
+            st.warning("다운로드할 영상 데이터 파일을 준비하는 데 실패했습니다.")
+            
+    if download_section_shown:
+        st.markdown("---")
+        
     if st.button("🔄 초기화", type="secondary"):
         st.session_state.clear()
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
@@ -491,7 +526,7 @@ def run_pipeline_first_turn(user_query: str):
     # 상태 저장
     st.session_state["last_schema"]   = schema
     st.session_state["last_csv"]      = csv_path
-    st.session_state["last_df"]       = df_stats
+    st.session_state["last_df"]       = df_stats # 영상 데이터프레임 저장
     st.session_state["sample_text"]   = sample_text
     st.session_state["last_keywords"] = kw_main
     st.session_state["last_entities"] = kw_ent
@@ -554,6 +589,17 @@ def run_followup_turn(user_query: str):
     scroll_to_bottom()
 
 # -------------------- 채팅 표시 & 입력 --------------------
+# 초기 화면 안내 메시지 추가 (요청 사항)
+if not st.session_state["chat"]:
+    st.info("""
+    **💬 분석을 시작하려면 질문을 입력하세요.**
+
+    **기간**과 **키워드**(인물/배우/IP 등)를 명시하여 질문해보세요.
+    - **예시 1:** `최근 24시간 태풍상사 반응`
+    - **예시 2:** `5월 10일부터 지금까지 이준호 반응`
+    """)
+
+
 # 채팅 기록을 표시
 render_chat()
 
