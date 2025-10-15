@@ -10,6 +10,7 @@ import os, re, gc, time
 from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import uuid4
+import io # CSV 다운로드 인코딩을 위한 모듈 추가
 
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -63,7 +64,7 @@ MAX_COMMENTS_PER_VID = 4_000
 def ensure_state():
     defaults = dict(
         chat=[],                 # [{role, content}]  (content: markdown)
-        meta_shown=False,        # 메타(키워드/기간) 표시했는지 여부 (첫 답변에만)
+        meta_shown=False,        # 메타(키워드/기간) 표시했는지 여부 (첫 답변에만) - 사용하지 않음
         last_schema=None,        # dict
         last_csv="",             # csv path
         last_df=None,            # videos df
@@ -80,10 +81,14 @@ ensure_state()
 with st.sidebar:
     st.markdown("## 💬 유튜브 댓글 분석 챗봇")
     
-    # ****************** 수정된 안내 문구 ******************
-    st.info("이 챗봇은 유튜브 댓글 분석에 최적화된 도구입니다. "
-            "**첫 질문 시** 댓글 수집 및 AI 분석이 시작되며, "
-            "이후 **후속 질문**은 **캐시된 댓글 샘플**을 기반으로 초고속 답변을 제공합니다.")
+    # 4. 좌측 사이드바에 설명 문구 수정 반영
+    st.info("""
+    **유튜브 댓글 분석 챗봇입니다.**
+    
+    1. **첫 질문 시** 댓글 수집 및 AI 분석에 다소 시간이 소요됩니다.
+    2. 이후 **후속 질문**은 캐시된 데이터로 초고속 답변을 제공합니다.
+    3. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
+    """)
     
     # -------------------- CSV 다운로드 기능 추가 --------------------
     csv_path = st.session_state.get("last_csv")
@@ -117,9 +122,12 @@ with st.sidebar:
     # 2. 영상 데이터 다운로드 (수정: 한글 깨짐 방지용 utf-8-sig 인코딩 적용)
     if df_videos is not None and not df_videos.empty:
         try:
-            # Pandas DataFrame을 CSV 문자열로 변환 (인코딩: utf-8-sig로 설정하여 엑셀에서 깨짐 방지)
-            # UTF-8 BOM(Byte Order Mark)을 추가하여 한글 깨짐 방지 (Excel 호환성 향상)
-            video_csv_data = df_videos.to_csv(index=False, encoding="utf-8-sig").encode('utf-8')
+            # ****************** 2. 영상 데이터 한글 깨짐 수정 ******************
+            # BytesIO를 사용하여 Pandas가 BOM을 포함한 UTF-8-SIG 바이트를 정확히 생성하도록 수정
+            buffer = io.BytesIO()
+            df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
+            video_csv_data = buffer.getvalue()
+            # ******************************************************************
             
             # 파일 이름 생성
             keywords = st.session_state.get("last_keywords", ["data"])
@@ -149,10 +157,10 @@ with st.sidebar:
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
 
-    # ****************** 문의 정보 추가 ******************
+    # ****************** 문의 정보 추가 (1. 볼드 제거 반영) ******************
     st.markdown("---")
     st.markdown("### 📞 문의")
-    st.markdown("미디어)디지털마케팅 데이터파트 **김호범**")
+    st.markdown("미디어)디지털마케팅 데이터파트 김호범") # **김호범** -> 김호범 변경
 
 
 def safe_rerun():
@@ -162,6 +170,34 @@ def safe_rerun():
 def scroll_to_bottom():
     # 항상 화면 가장 아래로 스크롤
     st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
+    
+# ****************** 3. 분석 메타데이터 채팅창 밖으로 분리 ******************
+def render_metadata_outside_chat():
+    """분석된 키워드와 기간을 채팅창 밖 상단에 표시"""
+    if not st.session_state.get("last_schema"): return
+    
+    schema = st.session_state["last_schema"]
+    kw_main  = schema.get("keywords", [])
+    start_iso = schema['start_iso']
+    end_iso = schema['end_iso']
+    
+    # ISO 8601 시간을 KST로 파싱하여 YYYY-MM-DD HH:MM 형식으로 변환 (사용자에게 친숙하게)
+    try:
+        start_dt_str = datetime.fromisoformat(start_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
+        end_dt_str = datetime.fromisoformat(end_iso).astimezone(KST).strftime('%Y-%m-%d %H:%M')
+    except ValueError:
+        start_dt_str = start_iso.split('T')[0]
+        end_dt_str = end_iso.split('T')[0]
+
+    metadata_html = (
+        f"<div style='font-size:14px; color:#4b5563; padding:8px 12px; border-radius:8px; border:1px solid #e5e7eb; margin-bottom:1rem; background-color: #f9fafb;'>"
+        f"**📊 현재 분석 컨텍스트:**<br>"
+        f"<span style='font-weight:600;'>키워드:</span> {', '.join(kw_main) if kw_main else '(없음)'}<br>"
+        f"<span style='font-weight:600;'>기간:</span> {start_dt_str} ~ {end_dt_str} (KST)"
+        f"</div>"
+    )
+    st.markdown(metadata_html, unsafe_allow_html=True)
+# **************************************************************************
 
 # -------------------- 키 로테이터 / 유튜브 --------------------
 class RotatingKeys:
@@ -545,22 +581,14 @@ def run_pipeline_first_turn(user_query: str):
     st.session_state["last_period"]   = (schema["start_iso"], schema["end_iso"])
     # ****************************************************
 
-    # 메타(한 번만)
-    meta_html = (
-        f"<div style='font-size:12px;color:#6b7280;margin-bottom:6px'>"
-        f"분석키워드: {', '.join(kw_main) if kw_main else '(없음)'} · "
-        f"기간: {schema['start_iso']} ~ {schema['end_iso']}"
-        f"</div>"
-    ) if not st.session_state["meta_shown"] else ""
-
+    # ****************** 3. 메타데이터 채팅창 표시 로직 제거 ******************
     with st.chat_message("assistant"):
-        if meta_html:
-            st.markdown(meta_html, unsafe_allow_html=True)
         st.markdown(answer_md)
-    st.session_state["chat"].append({"role":"assistant","content": (meta_html + ("\n" if meta_html else "")) + answer_md})
-    st.session_state["meta_shown"] = True
+    st.session_state["chat"].append({"role":"assistant","content": answer_md})
+    # **************************************************************************
+
     scroll_to_bottom()
-    # CSV 다운로드 버튼을 활성화하기 위해 리런 (사이드바 업데이트)
+    # CSV 다운로드 버튼을 활성화하기 위해 리런 (사이드바 및 메타데이터 영역 업데이트)
     safe_rerun() 
 
 # -------------------- 후속 질문 (재수집 없음) --------------------
@@ -603,6 +631,10 @@ def run_followup_turn(user_query: str):
     scroll_to_bottom()
 
 # -------------------- 채팅 표시 & 입력 --------------------
+# ****************** 3. 메타데이터 채팅창 밖으로 분리 후 렌더링 ******************
+render_metadata_outside_chat()
+# **************************************************************************
+
 # 초기 화면 안내 메시지 추가 (요청 사항)
 if not st.session_state["chat"]:
     st.markdown("""
