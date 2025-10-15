@@ -20,7 +20,7 @@ from streamlit.components.v1 import html as st_html
 # -------------------- 페이지/전역 --------------------
 st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# [수정] 챗봇 UI 스타일
+# [수정] 챗봇 UI 스타일 (안정적인 이전 버전으로 롤백 + 폰트 크기 조정)
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -37,44 +37,10 @@ header {visibility: hidden;}
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 
-/* 채팅 메시지 기본 스타일 */
-[data-testid="stChatMessage"] {
-    width: fit-content;
-    margin-bottom: 1rem;
-    padding: 0.8rem 1rem;
-    border-radius: 18px;
-    line-height: 1.5;
-}
-
-/* AI 답변 (assistant) 스타일 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
-    max-width: 100%;
-    background-color: #f0f2f6;
-    border: 1px solid #d1d5db;
-    **word-break: keep-all;   /* [핵심 수정] 한글 단어 중간 줄바꿈 방지 */
-    overflow-wrap: break-word; /* 긴 영단어/URL 등에서 줄바꿈 허용 */**
-}
-
-/* AI 답변 내부 텍스트 스타일 */
+/* AI 답변 내부 텍스트 폰트 크기 조정 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ol,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) ul,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) code {
-    font-size: 0.9rem;
-    color: #202123;
-}
-
-/* 사용자 질문 (user) 스타일 */
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
-    max-width: 90%;
-    background-color: #0084ff;
-    color: white;
-    margin-left: auto;
-}
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) p,
-[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) li {
-    color: white;
+[data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
+    font-size: 0.95rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -422,8 +388,7 @@ def run_followup_turn(user_query: str):
 
 # -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
 
-# [수정] 화면 전환 로직 개선
-# 1. 웰컴 화면 표시 (채팅이 아직 시작되지 않았을 때)
+# 1. 웰컴 또는 채팅 화면 표시
 if not st.session_state.chat:
     st.markdown("""
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
@@ -438,38 +403,39 @@ if not st.session_state.chat:
             </div>
         </div>
     """, unsafe_allow_html=True)
-# 2. 채팅 화면 표시 (채팅이 시작된 후)
 else:
     render_metadata_outside_chat()
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-# 3. 사용자 입력 처리
+# 2. 사용자 입력 처리 및 AI 응답 생성 (안정적인 로직으로 롤백)
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
-    # 첫 질문일 경우, 화면을 새로고침하여 웰컴 화면을 지움
-    is_first_turn = not st.session_state.chat
+    
+    # [수정] 첫 질문일 때 웰컴 화면이 사라지도록 처리
+    if not st.session_state.chat:
+        st.session_state.chat.append({"role": "user", "content": prompt})
+        st.rerun() # 리런을 통해 웰컴 화면을 지우고 채팅 화면으로 전환
+
     st.session_state.chat.append({"role": "user", "content": prompt})
     
-    if is_first_turn:
-        st.rerun()
-
-    # 채팅 화면에 사용자 질문 즉시 표시
+    # 화면에 사용자 질문 즉시 렌더링
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # AI 답변 생성 및 표시
+    # AI 응답 생성 및 렌더링
     with st.chat_message("assistant"):
-        container = st.empty()
-        if not st.session_state.get("last_csv"):
+        container = st.empty() # 로딩바/스피너와 최종 답변을 같은 위치에 표시하기 위함
+        
+        if len(st.session_state.get("last_csv","")) == 0: # 첫 질문
             progress_bar = container.progress(0, text="준비 중…")
             response = run_pipeline_first_turn(prompt, progress_bar)
-        else:
+        else: # 후속 질문
             with container.spinner("💬 AI가 답변을 구성 중입니다..."):
                 response = run_followup_turn(prompt)
         
-        container.markdown(response)
+        container.markdown(response) # 컨테이너에 최종 답변 표시
 
     st.session_state.chat.append({"role": "assistant", "content": response})
-    time.sleep(0.2) # 스크롤이 되기 전에 UI가 렌더링될 시간을 줌
+    time.sleep(0.2)
     scroll_to_bottom()
