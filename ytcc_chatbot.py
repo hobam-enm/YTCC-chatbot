@@ -46,11 +46,13 @@ footer {visibility: hidden;}
     line-height: 1.5;
 }
 
-/* AI 답변 (assistant) 스타일 - 너비 제한 없음 */
+/* AI 답변 (assistant) 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) {
-    max-width: none; /* [수정] 너비 제한 제거 */
+    max-width: 100%;
     background-color: #f0f2f6;
     border: 1px solid #d1d5db;
+    **word-break: keep-all;   /* [핵심 수정] 한글 단어 중간 줄바꿈 방지 */
+    overflow-wrap: break-word; /* 긴 영단어/URL 등에서 줄바꿈 허용 */**
 }
 
 /* AI 답변 내부 텍스트 스타일 */
@@ -65,7 +67,7 @@ footer {visibility: hidden;}
 
 /* 사용자 질문 (user) 스타일 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-user"]) {
-    max-width: 90%; /* 사용자 질문은 너비 제한 유지 */
+    max-width: 90%;
     background-color: #0084ff;
     color: white;
     margin-left: auto;
@@ -143,7 +145,7 @@ with st.sidebar:
 
 # -------------------- 로직 (수정 없음) --------------------
 def scroll_to_bottom():
-    st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView(); } </script>", height=0)
+    st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
 def render_metadata_outside_chat():
     if not st.session_state.get("last_schema"): return
@@ -339,7 +341,7 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
                     wrote_header = True; total_written += len(dfc)
             except Exception: pass
             done += 1
-            frac = 0.50 + (done / total_videos) * 0.40
+            frac = 0.50 + (done / total_videos) * 0.40 if total_videos > 0 else 0.50
             prog_bar.progress(min(0.90, frac), text="댓글 수집중…")
             if total_written >= max_total_comments: break
     return out_csv, total_written
@@ -420,6 +422,8 @@ def run_followup_turn(user_query: str):
 
 # -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
 
+# [수정] 화면 전환 로직 개선
+# 1. 웰컴 화면 표시 (채팅이 아직 시작되지 않았을 때)
 if not st.session_state.chat:
     st.markdown("""
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
@@ -434,32 +438,38 @@ if not st.session_state.chat:
             </div>
         </div>
     """, unsafe_allow_html=True)
+# 2. 채팅 화면 표시 (채팅이 시작된 후)
 else:
     render_metadata_outside_chat()
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-    scroll_to_bottom()
 
-
+# 3. 사용자 입력 처리
 if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
+    # 첫 질문일 경우, 화면을 새로고침하여 웰컴 화면을 지움
+    is_first_turn = not st.session_state.chat
     st.session_state.chat.append({"role": "user", "content": prompt})
-    st.rerun()
-
-if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
-    user_query = st.session_state.chat[-1]["content"]
     
+    if is_first_turn:
+        st.rerun()
+
+    # 채팅 화면에 사용자 질문 즉시 표시
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # AI 답변 생성 및 표시
     with st.chat_message("assistant"):
         container = st.empty()
-        
         if not st.session_state.get("last_csv"):
             progress_bar = container.progress(0, text="준비 중…")
-            response = run_pipeline_first_turn(user_query, progress_bar)
+            response = run_pipeline_first_turn(prompt, progress_bar)
         else:
             with container.spinner("💬 AI가 답변을 구성 중입니다..."):
-                response = run_followup_turn(user_query)
+                response = run_followup_turn(prompt)
         
         container.markdown(response)
 
     st.session_state.chat.append({"role": "assistant", "content": response})
-    st.rerun()
+    time.sleep(0.2) # 스크롤이 되기 전에 UI가 렌더링될 시간을 줌
+    scroll_to_bottom()
