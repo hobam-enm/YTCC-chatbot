@@ -162,6 +162,7 @@ def _build_session_name() -> str:
     # 이름 규칙 변경: 주제키워드_세션생성시점
     return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
 
+# [수정] 세션 저장 함수
 def save_current_session_to_github():
     if not all([GITHUB_REPO, GITHUB_TOKEN, st.session_state.chat, st.session_state.last_csv]):
         st.sidebar.warning("저장할 데이터가 없거나 GitHub 설정이 누락되었습니다.")
@@ -172,16 +173,24 @@ def save_current_session_to_github():
     os.makedirs(local_dir, exist_ok=True)
 
     try:
+        # 1. 메타데이터(qa.json)에 댓글 샘플(sample_text) 추가
         meta_path = os.path.join(local_dir, "qa.json")
-        meta_data = {"chat": st.session_state.chat, "last_schema": st.session_state.last_schema}
-        with open(meta_path, "w", encoding="utf-8") as f: json.dump(meta_data, f, ensure_ascii=False, indent=2)
+        meta_data = {
+            "chat": st.session_state.chat, 
+            "last_schema": st.session_state.last_schema,
+            "sample_text": st.session_state.sample_text  # <--- 이 부분 추가
+        }
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta_data, f, ensure_ascii=False, indent=2)
 
+        # 2. 데이터 파일 준비
         comments_path = os.path.join(local_dir, "comments.csv")
         videos_path = os.path.join(local_dir, "videos.csv")
         os.system(f'cp "{st.session_state.last_csv}" "{comments_path}"')
         if st.session_state.last_df is not None:
             st.session_state.last_df.to_csv(videos_path, index=False, encoding="utf-8-sig")
 
+        # 3. GitHub 업로드
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", meta_path, GITHUB_TOKEN)
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", comments_path, GITHUB_TOKEN)
         if os.path.exists(videos_path):
@@ -200,19 +209,24 @@ def load_session_from_github(sess_name: str):
             videos_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", GITHUB_TOKEN, os.path.join(local_dir, "videos.csv"))
 
             if not (qa_ok and comments_ok):
-                st.error("세션 핵심 파일(qa.json, comments.csv)을 불러오는 데 실패했습니다."); return
+                st.error("세션 핵심 파일(qa.json, comments.csv)을 불러오는 데 실패했습니다.")
+                return
 
-            st.session_state.clear(); ensure_state()
+            st.session_state.clear()
+            ensure_state()
             
             with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f: meta = json.load(f)
             
             st.session_state.update({
-                "chat": meta.get("chat", []), "last_schema": meta.get("last_schema", None),
+                "chat": meta.get("chat", []),
+                "last_schema": meta.get("last_schema", None),
                 "last_csv": os.path.join(local_dir, "comments.csv"),
                 "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
-                "loaded_session_name": sess_name, # [추가] 불러온 세션 이름 저장
+                "loaded_session_name": sess_name,
+                "sample_text": meta.get("sample_text", "") # <--- 샘플을 직접 불러오도록 수정
             })
-            st.session_state.sample_text, _, _ = serialize_comments_for_llm_from_file(st.session_state.last_csv)
+            # 샘플을 다시 만드는 로직 제거
+            
         except Exception as e:
             st.error(f"세션 로드 실패: {e}")
 
