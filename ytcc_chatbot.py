@@ -86,8 +86,7 @@ with st.sidebar:
     **유튜브 댓글 분석 챗봇입니다.**
     
     1. **첫 질문 시** 댓글 수집 및 AI 분석에 다소 시간이 소요됩니다.
-    2. 이후 **후속 질문**은 캐시된 데이터로 초고속 답변을 제공합니다.
-    3. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
+    2. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
     """)
     
     # -------------------- CSV 다운로드 기능 추가 --------------------
@@ -108,7 +107,7 @@ with st.sidebar:
 
             st.markdown("---")
             st.download_button(
-                label="⬇️ 수집된 댓글 데이터 (CSV) 다운로드",
+                label="⬇️ 댓글 데이터 다운로드드",
                 data=csv_data,
                 file_name=file_name,
                 mime="text/csv",
@@ -138,7 +137,7 @@ with st.sidebar:
                  st.markdown("---") 
 
             st.download_button(
-                label="🎬 수집된 영상 메타데이터 (CSV) 다운로드",
+                label="🎬 영상 리스트 다운로드",
                 data=video_csv_data,
                 file_name=video_file_name,
                 mime="text/csv",
@@ -160,7 +159,7 @@ with st.sidebar:
     # ****************** 문의 정보 추가 (1. 볼드 제거 반영) ******************
     st.markdown("---")
     st.markdown("### 📞 문의")
-    st.markdown("미디어)디지털마케팅 데이터파트 김호범") # **김호범** -> 김호범 변경
+    st.markdown("미디어)디지털마케팅 데이터파트 김호범")
 
 
 def safe_rerun():
