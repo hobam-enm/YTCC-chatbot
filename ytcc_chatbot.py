@@ -21,7 +21,7 @@ from streamlit.components.v1 import html as st_html
 # 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
 st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
+# 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -34,6 +34,43 @@ st.markdown("""
 /* 채팅 입력창이 고정될 수 있도록 여백 조정 */
 [data-testid="stSidebarContent"] {
     padding-top: 1rem;
+}
+
+/* Custom CSS for Sleek Welcome Screen and Centered Input */
+/* Center and constrain the chat input at the bottom */
+[data-testid="stChatInputContainer"] {
+    width: 100%;
+    max-width: 900px; /* 질문창 폭 제한 */
+    margin: 0 auto;
+    left: 50%;
+    transform: translateX(-50%);
+    position: fixed; 
+    bottom: 0;
+    z-index: 1000;
+    /* Streamlit이 기본적으로 주는 input container padding을 줄여서 더 간결하게 */
+    padding-bottom: 1rem; 
+    padding-top: 0.5rem;
+}
+/* Ensure the chat history area leaves sufficient space for the centered fixed input */
+.stApp {
+    padding-bottom: 7rem; /* 입력창 높이 + 여백 확보 */
+}
+/* Center the initial welcome content vertically and horizontally */
+.centered-content {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 70vh; /* 뷰포트 높이의 70%를 사용해 중앙 정렬 */
+    text-align: center;
+    max-width: 800px; 
+    margin: 0 auto;
+}
+.centered-content h1 {
+    font-size: 3rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: #374151; /* Darker text for prominence */
 }
 </style>
 """, unsafe_allow_html=True)
@@ -86,7 +123,8 @@ with st.sidebar:
     **유튜브 댓글 분석 챗봇입니다.**
     
     1. **첫 질문 시** 댓글 수집 및 AI 분석에 다소 시간이 소요됩니다.
-    2. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
+    2. 이후 **후속 질문**은 캐시된 데이터로 초고속 답변을 제공합니다.
+    3. 한 세션에서는 **하나의 주제**와 관련된 질문만 진행해야 합니다.
     """)
     
     # -------------------- CSV 다운로드 기능 추가 --------------------
@@ -107,7 +145,7 @@ with st.sidebar:
 
             st.markdown("---")
             st.download_button(
-                label="⬇️ 댓글 데이터 다운로드",
+                label="⬇️ 수집된 댓글 데이터 (CSV) 다운로드",
                 data=csv_data,
                 file_name=file_name,
                 mime="text/csv",
@@ -121,12 +159,10 @@ with st.sidebar:
     # 2. 영상 데이터 다운로드 (수정: 한글 깨짐 방지용 utf-8-sig 인코딩 적용)
     if df_videos is not None and not df_videos.empty:
         try:
-            # ****************** 2. 영상 데이터 한글 깨짐 수정 ******************
             # BytesIO를 사용하여 Pandas가 BOM을 포함한 UTF-8-SIG 바이트를 정확히 생성하도록 수정
             buffer = io.BytesIO()
             df_videos.to_csv(buffer, index=False, encoding="utf-8-sig")
             video_csv_data = buffer.getvalue()
-            # ******************************************************************
             
             # 파일 이름 생성
             keywords = st.session_state.get("last_keywords", ["data"])
@@ -137,7 +173,7 @@ with st.sidebar:
                  st.markdown("---") 
 
             st.download_button(
-                label="🎬 영상 리스트 다운로드",
+                label="🎬 수집된 영상 메타데이터 (CSV) 다운로드",
                 data=video_csv_data,
                 file_name=video_file_name,
                 mime="text/csv",
@@ -156,10 +192,10 @@ with st.sidebar:
         fn = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
         if callable(fn): fn()
 
-    # ****************** 문의 정보 추가 (1. 볼드 제거 반영) ******************
+    # 1. 볼드 제거 반영
     st.markdown("---")
     st.markdown("### 📞 문의")
-    st.markdown("미디어)디지털마케팅 데이터파트 김호범")
+    st.markdown("미디어)디지털마케팅 데이터파트 김호범") # **김호범** -> 김호범 변경
 
 
 def safe_rerun():
@@ -170,7 +206,7 @@ def scroll_to_bottom():
     # 항상 화면 가장 아래로 스크롤
     st_html("<script>window.scrollTo(0, document.body.scrollHeight);</script>", height=0)
     
-# ****************** 3. 분석 메타데이터 채팅창 밖으로 분리 ******************
+# 3. 분석 메타데이터 채팅창 밖으로 분리
 def render_metadata_outside_chat():
     """분석된 키워드와 기간을 채팅창 밖 상단에 표시"""
     if not st.session_state.get("last_schema"): return
@@ -196,9 +232,53 @@ def render_metadata_outside_chat():
         f"</div>"
     )
     st.markdown(metadata_html, unsafe_allow_html=True)
-# **************************************************************************
 
-# -------------------- 키 로테이터 / 유튜브 --------------------
+
+# -------------------- 키 로테이터 / 유튜브 / LLM 호출 (생략 - 이전 버전과 동일) --------------------
+# ... (RotatingKeys, RotatingYouTube, call_gemini_rotating, parse_light_block_to_schema 등은 동일)
+
+LIGHT_PROMPT = (
+    "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
+    "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
+    "규칙:\n"
+    "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
+    "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
+    "출력(6줄 고정):\n"
+    "- 한 줄 요약: <문장>\n"
+    "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
+    "- 키워드: [<메인1>, <메인2>…]\n"
+    "- 엔티티/보조: [<보조들>]\n"
+    "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
+    "- 원문: {USER_QUERY}\n\n"
+    f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
+)
+def is_gemini_quota_error(exc: Exception) -> bool:
+    msg = (str(exc) or "").lower()
+    return ("429" in msg) or ("too many requests" in msg) or ("rate limit" in msg) or ("resource exhausted" in msg) or ("quota" in msg)
+
+def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
+    rk = RotatingKeys(keys, "gem_key_idx")
+    if not rk.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
+    attempts = 0
+    while attempts < (len(rk.keys) if rk.keys else 1):
+        try:
+            genai.configure(api_key=rk.current())
+            model = genai.GenerativeModel(model_name, system_instruction=system_instruction, generation_config={"temperature":0.2,"max_output_tokens":max_tokens})
+            resp = model.generate_content([user_payload], request_options={"timeout": timeout_s})
+            out = getattr(resp,"text",None)
+            if not out and getattr(resp, "candidates", None):
+                c0 = resp.candidates[0]
+                if getattr(c0, "content", None) and getattr(c0.content, "parts", None):
+                    p0 = c0.content.parts[0]
+                    if hasattr(p0, "text"): out = p0.text
+            return out or ""
+        except Exception as e:
+            if is_gemini_quota_error(e) and len(rk.keys) > 1:
+                rk.rotate(); attempts += 1; continue
+            raise
+# ... (yt_search_videos, yt_video_statistics, yt_all_replies, yt_all_comments_sync, parallel_collect_comments_streaming, serialize_comments_for_llm_from_file, tidy_answer, run_pipeline_first_turn, run_followup_turn 등은 동일)
+# ********************************************************************************************************************
+
 class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
@@ -234,48 +314,6 @@ class RotatingYouTube:
             if quotaish and len(YT_API_KEYS) > 1:
                 self.rot.rotate(); self._build()
                 return factory(self.service).execute()
-            raise
-
-# -------------------- 해석 프롬프트/파서 --------------------
-LIGHT_PROMPT = (
-    "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
-    "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
-    "규칙:\n"
-    "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
-    "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
-    "출력(6줄 고정):\n"
-    "- 한 줄 요약: <문장>\n"
-    "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
-    "- 키워드: [<메인1>, <메인2>…]\n"
-    "- 엔티티/보조: [<보조들>]\n"
-    "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
-    "- 원문: {USER_QUERY}\n\n"
-    f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
-)
-
-def is_gemini_quota_error(exc: Exception) -> bool:
-    msg = (str(exc) or "").lower()
-    return ("429" in msg) or ("too many requests" in msg) or ("rate limit" in msg) or ("resource exhausted" in msg) or ("quota" in msg)
-
-def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
-    rk = RotatingKeys(keys, "gem_key_idx")
-    if not rk.current(): raise RuntimeError("Gemini API Key가 비어 있습니다.")
-    attempts = 0
-    while attempts < (len(rk.keys) if rk.keys else 1):
-        try:
-            genai.configure(api_key=rk.current())
-            model = genai.GenerativeModel(model_name, generation_config={"temperature":0.2,"max_output_tokens":max_tokens})
-            resp = model.generate_content([system_instruction, user_payload], request_options={"timeout": timeout_s})
-            out = getattr(resp,"text",None)
-            if not out and getattr(resp, "candidates", None):
-                c0 = resp.candidates[0]
-                if getattr(c0, "content", None) and getattr(c0.content, "parts", None):
-                    p0 = c0.content.parts[0]
-                    if hasattr(p0, "text"): out = p0.text
-            return out or ""
-        except Exception as e:
-            if is_gemini_quota_error(e) and len(rk.keys) > 1:
-                rk.rotate(); attempts += 1; continue
             raise
 
 def parse_light_block_to_schema(light_text: str) -> dict:
@@ -318,7 +356,7 @@ def parse_light_block_to_schema(light_text: str) -> dict:
 
     return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
 
-# -------------------- YouTube API --------------------
+
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
     while len(video_ids) < max_results:
@@ -444,7 +482,6 @@ def parallel_collect_comments_streaming(video_list, rt_keys, include_replies, ma
             if total_written >= max_total_comments: break
     return out_csv, total_written
 
-# -------------------- LLM 직렬화 --------------------
 def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars_per_comment=280, max_total_chars=420_000):
     if not csv_path or not os.path.exists(csv_path): return "", 0, 0
     lines, total = [], 0; remaining = max_rows
@@ -463,7 +500,6 @@ def serialize_comments_for_llm_from_file(csv_path: str, max_rows=1500, max_chars
         if remaining <= 0 or total >= max_total_chars: break
     return "\n".join(lines), len(lines), total
 
-# -------------------- 응답 정리(핵심만) --------------------
 TITLE_LINE_RE = re.compile(r"^\s{0,3}#{1,6}\s+.*$")  # #, ##, ### ... 로 시작하는 제목 제거
 HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)  # 흔한 제목 라인 제거
 
@@ -489,20 +525,18 @@ def tidy_answer(md: str) -> str:
         cleaned.append(l)
     return "\n".join(cleaned).strip()
 
-# -------------------- 렌더 --------------------
 def render_chat():
     for m in st.session_state["chat"]:
         with st.chat_message(m["role"]):
             st.markdown(m["content"])
 
-# -------------------- 파이프라인 (첫 질문) --------------------
 def run_pipeline_first_turn(user_query: str):
     # 단일 진행바: 파싱(0.1) → 영상(0.4) → 댓글(≤0.9) → AI(1.0)
     prog = st.progress(0.0, text="해석중…")
     # 1) 해석
     if not GEMINI_API_KEYS:
         with st.chat_message("assistant"): st.markdown("Gemini API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료"); # prog.empty()
+        prog.progress(1.0, text="완료"); 
         return
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
                                  timeout_s=GEMINI_TIMEOUT, max_tokens=GEMINI_MAX_TOKENS)
@@ -512,7 +546,7 @@ def run_pipeline_first_turn(user_query: str):
     # 2) 검색
     if not YT_API_KEYS:
         with st.chat_message("assistant"): st.markdown("YouTube API Key가 비어 있어요.")
-        prog.progress(1.0, text="완료"); # prog.empty()
+        prog.progress(1.0, text="완료"); 
         return
     start_dt = datetime.fromisoformat(schema["start_iso"]).astimezone(KST)
     end_dt   = datetime.fromisoformat(schema["end_iso"]).astimezone(KST)
@@ -552,7 +586,7 @@ def run_pipeline_first_turn(user_query: str):
 
     # 4) AI 요약
     prog.progress(0.90, text="AI 분석중…")
-    # ****************** 캐시 데이터 생성 ******************
+    # 캐시 데이터 생성
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
     # ****************************************************
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
@@ -570,7 +604,7 @@ def run_pipeline_first_turn(user_query: str):
     prog.progress(1.0, text="완료")
     # prog.empty() # 진행바 제거 로직 제거
 
-    # ****************** 상태 저장 (캐시) ******************
+    # 상태 저장 (캐시)
     st.session_state["last_schema"]   = schema
     st.session_state["last_csv"]      = csv_path
     st.session_state["last_df"]       = df_stats # 영상 데이터프레임 저장
@@ -580,7 +614,7 @@ def run_pipeline_first_turn(user_query: str):
     st.session_state["last_period"]   = (schema["start_iso"], schema["end_iso"])
     # ****************************************************
 
-    # ****************** 3. 메타데이터 채팅창 표시 로직 제거 ******************
+    # 3. 메타데이터 채팅창 표시 로직 제거
     with st.chat_message("assistant"):
         st.markdown(answer_md)
     st.session_state["chat"].append({"role":"assistant","content": answer_md})
@@ -590,10 +624,9 @@ def run_pipeline_first_turn(user_query: str):
     # CSV 다운로드 버튼을 활성화하기 위해 리런 (사이드바 및 메타데이터 영역 업데이트)
     safe_rerun() 
 
-# -------------------- 후속 질문 (재수집 없음) --------------------
 def run_followup_turn(user_query: str):
     schema = st.session_state.get("last_schema") or {}
-    # ****************** 캐시된 댓글 샘플 사용 ******************
+    # 캐시된 댓글 샘플 사용
     sample_text = st.session_state.get("sample_text","")
 
     # 최근 대화문맥
@@ -630,23 +663,32 @@ def run_followup_turn(user_query: str):
     scroll_to_bottom()
 
 # -------------------- 채팅 표시 & 입력 --------------------
-# ****************** 3. 메타데이터 채팅창 밖으로 분리 후 렌더링 ******************
+# 3. 분석 메타데이터 채팅창 밖으로 분리 후 렌더링 (분석 시작 후 표시)
 render_metadata_outside_chat()
-# **************************************************************************
-
-# 초기 화면 안내 메시지 추가 (요청 사항)
-if not st.session_state["chat"]:
-    st.markdown("""
-    ## 💬 분석을 시작하려면 질문을 입력하세요.
-    **기간**과 **키워드**(인물/배우/IP 등)를 명시하여 분석을 시작할 수 있습니다.
-    
-    > **💡 예시 1:** `최근 24시간 태풍상사 반응`
-    > **💡 예시 2:** `5월 10일부터 지금까지 이준호 반응`
-    """)
-
 
 # 채팅 기록을 표시
 render_chat()
+
+# ****************** 초기 화면 수정: 심플 & 중앙 정렬 ******************
+if not st.session_state["chat"]:
+    # Welcome Screen Logic (Centralized)
+    st.markdown("""
+    <div class="centered-content">
+        <h1 style="color:#2563eb;">💬 Comment Insight AI</h1>
+        <p style="font-size:1.1rem; color:#6b7280;">유튜브 댓글 데이터를 수집 및 분석하여 인사이트를 제공합니다.</p>
+        <p style="font-size:1.1rem; color:#6b7280;">분석을 시작하려면 아래 질문창에 분석 키워드와 기간을 입력하세요.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Usage/Disclaimer Note (Small text at the bottom, near the input box)
+    st.markdown("""
+    <div style="text-align:center; font-size:0.8rem; color:#9ca3af; margin-top:20px;">
+        💡 **사용법:** **키워드**와 **기간**을 명시해 질문하세요 (예: '최근 24시간 태풍상사 반응').
+        <br>※ 첫 질문 시 데이터 수집에 시간이 소요되며, 한 세션에서 하나의 주제만 질문해야 합니다.
+    </div>
+    <div style="margin-bottom:80px;"></div> <!-- 입력창과 겹치지 않도록 여백 확보 -->
+    """, unsafe_allow_html=True)
+# **************************************************************************
 
 # 챗봇 입력창 (Streamlit 기본 기능으로 하단에 고정됨)
 prompt = st.chat_input(placeholder="예) 최근 24시간 태풍상사 김준호 반응 요약해줘")
