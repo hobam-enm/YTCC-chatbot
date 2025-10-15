@@ -175,11 +175,43 @@ def github_rename_session(old_name, new_name, token):
 
 # --- 세션 관리 함수 ---
 def _build_session_name() -> str:
-    if st.session_state.get("loaded_session_name"): return st.session_state.loaded_session_name
+    # 덮어쓰기 로직: 이미 불러온 세션이 있다면 그 이름을 그대로 사용
+    if st.session_state.get("loaded_session_name"):
+        return st.session_state.loaded_session_name
+
+    # 1. 현재 분석의 핵심 키워드를 가져옴
     schema = st.session_state.get("last_schema", {})
     kw = (schema.get("keywords", ["NoKeyword"]))[0]
     kw_slug = re.sub(r'[^\w-]', '', kw.replace(' ', '_'))[:20]
-    return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
+
+    # 2. GitHub에서 현재 키워드로 시작하는 모든 세션 목록을 가져옴
+    if GITHUB_TOKEN and GITHUB_REPO:
+        try:
+            all_sessions = github_list_dir(GITHUB_REPO, GITHUB_BRANCH, "sessions", GITHUB_TOKEN)
+            
+            # 3. 현재 키워드와 일치하는 세션들만 필터링
+            keyword_sessions = [s for s in all_sessions if s.startswith(f"{kw_slug}_")]
+
+            # 4. 필터링된 세션 이름에서 숫자 부분을 추출하여 가장 큰 숫자를 찾음
+            max_num = 0
+            for sess_name in keyword_sessions:
+                try:
+                    num_part = sess_name.rsplit('_', 1)[-1]
+                    if num_part.isdigit():
+                        max_num = max(max_num, int(num_part))
+                except (IndexError, ValueError):
+                    continue # 숫자 형식이 아닌 경우 무시
+
+            # 5. 새 세션 이름 생성 (가장 큰 숫자 + 1)
+            new_num = max_num + 1
+            return f"{kw_slug}_{new_num}"
+
+        except Exception:
+            # GitHub API 호출 실패 시, 기존 시간 기반 이름으로 대체
+            return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
+    else:
+        # GitHub 설정이 없을 경우, 기존 시간 기반 이름 사용
+        return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
 
 def save_current_session_to_github():
     if not all([GITHUB_REPO, GITHUB_TOKEN, st.session_state.chat, st.session_state.last_csv]):
