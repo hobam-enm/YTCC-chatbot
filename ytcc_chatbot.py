@@ -20,7 +20,7 @@ from streamlit.components.v1 import html as st_html
 # -------------------- 페이지/전역 --------------------
 st.set_page_config(page_title="유튜브 댓글분석: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
-# [수정] 챗봇 UI 스타일 (안정적인 이전 버전으로 롤백 + 폰트 크기 조정)
+# [수정] 챗봇 UI 스타일 (롤백 + 폰트 크기 조정)
 st.markdown("""
 <style>
 /* Streamlit 메인 컨테이너 패딩 최소화 */
@@ -37,7 +37,7 @@ header {visibility: hidden;}
 footer {visibility: hidden;}
 #MainMenu {visibility: hidden;}
 
-/* AI 답변 내부 텍스트 폰트 크기 조정 */
+/* AI 답변 폰트 크기 조정 */
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) p,
 [data-testid="stChatMessage"]:has(span[data-testid="chat-avatar-assistant"]) li {
     font-size: 0.95rem;
@@ -81,7 +81,7 @@ def ensure_state():
         if k not in st.session_state: st.session_state[k] = v
 ensure_state()
 
-# -------------------- 사이드바 (수정 없음) --------------------
+# -------------------- 사이드바 --------------------
 with st.sidebar:
     st.markdown("""
     <style>
@@ -109,7 +109,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# -------------------- 로직 (수정 없음) --------------------
+# -------------------- 로직 --------------------
 def scroll_to_bottom():
     st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
@@ -133,6 +133,11 @@ def render_metadata_outside_chat():
     )
     st.markdown(metadata_html, unsafe_allow_html=True)
 
+def render_chat():
+    for msg in st.session_state.chat:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+    
 class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
@@ -345,7 +350,8 @@ def tidy_answer(md: str) -> str:
         prev_blank = is_blank
     return "\n".join(cleaned).strip()
 
-def run_pipeline_first_turn(user_query: str, prog_bar):
+def run_pipeline_first_turn(user_query: str):
+    prog_bar = st.progress(0, text="준비 중…")
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
     prog_bar.progress(0.05, text="해석중…")
     light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
@@ -376,6 +382,7 @@ def run_pipeline_first_turn(user_query: str, prog_bar):
     answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
     prog_bar.progress(1.0, text="완료")
     time.sleep(0.5)
+    prog_bar.empty()
     return tidy_answer(answer_md_raw)
 
 def run_followup_turn(user_query: str):
@@ -384,11 +391,12 @@ def run_followup_turn(user_query: str):
     context = "\n".join(f"[이전 {'Q' if m['role']=='user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
     sys = "너는 유튜브 댓글 분석가다. 주어진 댓글 샘플과 이전 대화 맥락을 바탕으로 현재 질문에 간결하게 답하라. 반드시 댓글 샘플을 근거로 답하고, 인용은 5개 이하로 하라."
     payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso','?')} ~ {schema.get('end_iso','?')}\n\n[댓글 샘플]:\n{sample_text}\n"
-    return tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
+    with st.spinner("💬 AI가 답변을 구성 중입니다..."):
+        response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
+    return response
 
-# -------------------- 메인 화면 및 실행 로직 [전체 수정] --------------------
+# -------------------- 메인 화면 및 실행 로직 [안정 버전으로 롤백] --------------------
 
-# 1. 웰컴 또는 채팅 화면 표시
 if not st.session_state.chat:
     st.markdown("""
         <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;">
@@ -405,37 +413,20 @@ if not st.session_state.chat:
     """, unsafe_allow_html=True)
 else:
     render_metadata_outside_chat()
-    for msg in st.session_state.chat:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-
-# 2. 사용자 입력 처리 및 AI 응답 생성 (안정적인 로직으로 롤백)
-if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
-    
-    # [수정] 첫 질문일 때 웰컴 화면이 사라지도록 처리
-    if not st.session_state.chat:
-        st.session_state.chat.append({"role": "user", "content": prompt})
-        st.rerun() # 리런을 통해 웰컴 화면을 지우고 채팅 화면으로 전환
-
-    st.session_state.chat.append({"role": "user", "content": prompt})
-    
-    # 화면에 사용자 질문 즉시 렌더링
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    # AI 응답 생성 및 렌더링
-    with st.chat_message("assistant"):
-        container = st.empty() # 로딩바/스피너와 최종 답변을 같은 위치에 표시하기 위함
-        
-        if len(st.session_state.get("last_csv","")) == 0: # 첫 질문
-            progress_bar = container.progress(0, text="준비 중…")
-            response = run_pipeline_first_turn(prompt, progress_bar)
-        else: # 후속 질문
-            with container.spinner("💬 AI가 답변을 구성 중입니다..."):
-                response = run_followup_turn(prompt)
-        
-        container.markdown(response) # 컨테이너에 최종 답변 표시
-
-    st.session_state.chat.append({"role": "assistant", "content": response})
-    time.sleep(0.2)
+    render_chat()
     scroll_to_bottom()
+
+if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 요약해줘"):
+    st.session_state.chat.append({"role": "user", "content": prompt})
+    st.rerun()
+
+if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
+    user_query = st.session_state.chat[-1]["content"]
+
+    if not st.session_state.get("last_csv"): # 첫 질문
+        response = run_pipeline_first_turn(user_query)
+    else: # 후속 질문
+        response = run_followup_turn(user_query)
+    
+    st.session_state.chat.append({"role": "assistant", "content": response})
+    st.rerun()
