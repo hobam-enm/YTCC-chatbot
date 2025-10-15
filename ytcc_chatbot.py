@@ -87,12 +87,12 @@ st.markdown("""
     /* 새 채팅 버튼 스타일 */
     .new-chat-btn button {
         background-color: #e8f0fe;
-        color: #1967d2;
+        color: #0052CC !important;; /* 선명한 파란색 텍스트 */
         border: 1px solid #d2e3fc !important;
     }
     .new-chat-btn button:hover {
         background-color: #d2e3fc;
-        color: #185abc;
+        olor: #0041A3 !important;; /* 더 진한 파란색 텍스트 *
         border: 1px solid #c2d8f8 !important;
     }
 </style>
