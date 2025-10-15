@@ -62,7 +62,7 @@ footer {visibility: hidden;}
 .stDownloadButton button:hover {
     color: #0b5cab;
 }
-/* [수정] 세션 목록 버튼 스타일 */
+/* 세션 목록 버튼 스타일 */
 .session-list .stButton button {
     font-size: 0.9rem;
     text-align: left;
@@ -72,7 +72,7 @@ footer {visibility: hidden;}
     text-overflow: ellipsis;
     display: block;
 }
-/* [수정] 새 채팅 버튼 스타일 */
+/* 새 채팅 버튼 스타일 */
 .new-chat-btn button {
     background-color: #e8f0fe;
     color: #1967d2;
@@ -161,19 +161,16 @@ def github_delete_folder(repo, branch, folder_path, token):
         data = {"message": f"delete: {item['name']}", "sha": item['sha'], "branch": branch}
         requests.delete(delete_url, headers=headers, json=data).raise_for_status()
 
-# [오류 수정] 누락되었던 이름 변경 함수 추가
 def github_rename_session(old_name, new_name, token):
     contents_url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/sessions/{old_name}?ref={GITHUB_BRANCH}"
     resp = requests.get(contents_url, headers=_gh_headers(token)); resp.raise_for_status()
     files_to_move = resp.json()
-
     for item in files_to_move:
         filename = item['name']
         local_path = os.path.join(SESS_DIR, filename)
         if not github_download_file(GITHUB_REPO, GITHUB_BRANCH, item['path'], token, local_path):
             raise Exception(f"Failed to download {filename} from {old_name}")
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{new_name}/{filename}", local_path, token)
-    
     github_delete_folder(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{old_name}", token)
 
 # --- 세션 관리 함수 ---
@@ -199,7 +196,7 @@ def save_current_session_to_github():
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", meta_path, GITHUB_TOKEN)
         github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", comments_path, GITHUB_TOKEN)
         if os.path.exists(videos_path): github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", videos_path, GITHUB_TOKEN)
-        st.session_state.loaded_session_name = sess_name # 덮어쓰기를 위해 현재 세션 이름 업데이트
+        st.session_state.loaded_session_name = sess_name
         return True, sess_name
     except Exception as e: return False, f"저장 실패: {e}"
 
@@ -234,7 +231,7 @@ if 'session_to_rename' in st.session_state:
             except Exception as e: st.error(f"변경 실패: {e}")
         time.sleep(1); st.rerun()
 
-# -------------------- 사이드바 --------------------
+# --- 사이드바 ---
 with st.sidebar:
     st.markdown(f'<h2 style="font-weight: 600; font-size: 1.6rem; margin-bottom: 1.5rem; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">💬 유튜브 댓글분석: AI 챗봇</h2>', unsafe_allow_html=True)
     st.markdown("""<style>[data-testid="stSidebarUserContent"] { display: flex; flex-direction: column; height: calc(100vh - 4rem); } .sidebar-top-section { flex-grow: 1; overflow-y: auto; } .sidebar-bottom-section { flex-shrink: 0; }</style>""", unsafe_allow_html=True)
@@ -276,7 +273,7 @@ with st.sidebar:
     st.markdown("""<hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트 김호범</p>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------- 로직 (이하 수정 없음) --------------------
+# -------------------- 로직 (이하 복원 및 수정 없음) --------------------
 def scroll_to_bottom(): st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 def render_metadata_and_downloads():
     if not (schema := st.session_state.get("last_schema")): return
