@@ -54,7 +54,7 @@ footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
-# --- [추가] 경로 및 GitHub 설정 ---
+# --- 경로 및 GitHub 설정 ---
 BASE_DIR = "/tmp"
 SESS_DIR = os.path.join(BASE_DIR, "sessions")
 os.makedirs(SESS_DIR, exist_ok=True)
@@ -89,7 +89,7 @@ def ensure_state():
         if k not in st.session_state: st.session_state[k] = v
 ensure_state()
 
-# --- [추가] GitHub API 함수 ---
+# --- GitHub API 함수 ---
 def _gh_headers(token: str):
     return {"Authorization": f"token {token}", "Accept": "application/vnd.github.v3+json"}
 
@@ -119,53 +119,51 @@ def github_download_file(repo, branch, path_in_repo, token, local_path):
         return True
     return False
 
-# --- [추가] 세션 관리 함수 ---
+# --- 세션 관리 함수 ---
 def _build_session_name() -> str:
     schema = st.session_state.get("last_schema", {})
     kw = (schema.get("keywords", ["NoKeyword"]))[0]
-    kw_slug = re.sub(r'[^\w-]', '', kw.replace(' ', '_'))
-    return f"{now_kst().strftime('%Y-%m-%d_%H%M')}_{kw_slug}"
+    kw_slug = re.sub(r'[^\w-]', '', kw.replace(' ', '_'))[:20] # 너무 길지 않게
+    return f"{now_kst().strftime('%y%m%d_%H%M')}_{kw_slug}"
 
+# [오류 수정] 스피너를 외부로 분리하고, 함수는 로직만 처리
 def save_current_session_to_github():
     if not all([GITHUB_REPO, GITHUB_TOKEN, st.session_state.chat, st.session_state.last_csv]):
         st.sidebar.warning("저장할 데이터가 없거나 GitHub 설정이 누락되었습니다.")
-        return
+        return False, ""
     
     sess_name = _build_session_name()
     local_dir = os.path.join(SESS_DIR, sess_name)
     os.makedirs(local_dir, exist_ok=True)
 
-    # 1. 메타데이터(qa.json) 저장
-    meta_path = os.path.join(local_dir, "qa.json")
-    meta_data = {"chat": st.session_state.chat, "last_schema": st.session_state.last_schema}
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta_data, f, ensure_ascii=False, indent=2)
+    try:
+        # 1. 메타데이터(qa.json) 저장
+        meta_path = os.path.join(local_dir, "qa.json")
+        meta_data = {"chat": st.session_state.chat, "last_schema": st.session_state.last_schema}
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta_data, f, ensure_ascii=False, indent=2)
 
-    # 2. 데이터 파일 준비
-    comments_path = os.path.join(local_dir, "comments.csv")
-    videos_path = os.path.join(local_dir, "videos.csv")
-    os.system(f'cp "{st.session_state.last_csv}" "{comments_path}"')
-    if st.session_state.last_df is not None:
-        st.session_state.last_df.to_csv(videos_path, index=False, encoding="utf-8-sig")
+        # 2. 데이터 파일 준비
+        comments_path = os.path.join(local_dir, "comments.csv")
+        videos_path = os.path.join(local_dir, "videos.csv")
+        os.system(f'cp "{st.session_state.last_csv}" "{comments_path}"')
+        if st.session_state.last_df is not None:
+            st.session_state.last_df.to_csv(videos_path, index=False, encoding="utf-8-sig")
 
-    # 3. GitHub 업로드
-    with st.sidebar.spinner(f"세션 '{sess_name}' 저장 중..."):
-        try:
-            github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", meta_path, GITHUB_TOKEN)
-            github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", comments_path, GITHUB_TOKEN)
-            if os.path.exists(videos_path):
-                github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", videos_path, GITHUB_TOKEN)
-            st.sidebar.success(f"세션 저장 완료!")
-            time.sleep(2) # 성공 메시지 확인 시간
-        except Exception as e:
-            st.sidebar.error(f"저장 실패: {e}")
+        # 3. GitHub 업로드
+        github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", meta_path, GITHUB_TOKEN)
+        github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", comments_path, GITHUB_TOKEN)
+        if os.path.exists(videos_path):
+            github_upload_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", videos_path, GITHUB_TOKEN)
+        return True, sess_name
+    except Exception as e:
+        st.sidebar.error(f"저장 실패: {e}")
+        return False, ""
 
 def load_session_from_github(sess_name: str):
     with st.spinner(f"세션 '{sess_name}' 불러오는 중..."):
         try:
             local_dir = os.path.join(SESS_DIR, sess_name)
-            
-            # 1. 파일 다운로드
             qa_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/qa.json", GITHUB_TOKEN, os.path.join(local_dir, "qa.json"))
             comments_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/comments.csv", GITHUB_TOKEN, os.path.join(local_dir, "comments.csv"))
             videos_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", GITHUB_TOKEN, os.path.join(local_dir, "videos.csv"))
@@ -174,43 +172,59 @@ def load_session_from_github(sess_name: str):
                 st.error("세션 핵심 파일(qa.json, comments.csv)을 불러오는 데 실패했습니다.")
                 return
 
-            # 2. 세션 상태 복원
-            st.session_state.clear() # 기존 상태 초기화
-            ensure_state() # 기본 상태 다시 설정
+            st.session_state.clear()
+            ensure_state()
             
-            with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f:
-                meta = json.load(f)
+            with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f: meta = json.load(f)
             
-            st.session_state.chat = meta.get("chat", [])
-            st.session_state.last_schema = meta.get("last_schema", None)
-            st.session_state.last_csv = os.path.join(local_dir, "comments.csv")
-            
-            if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")):
-                st.session_state.last_df = pd.read_csv(os.path.join(local_dir, "videos.csv"))
-            else:
-                st.session_state.last_df = pd.DataFrame() # 빈 데이터프레임
-
-            # 후속 질문을 위한 샘플 텍스트 재생성
+            st.session_state.update({
+                "chat": meta.get("chat", []),
+                "last_schema": meta.get("last_schema", None),
+                "last_csv": os.path.join(local_dir, "comments.csv"),
+                "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
+            })
             st.session_state.sample_text, _, _ = serialize_comments_for_llm_from_file(st.session_state.last_csv)
-            
         except Exception as e:
             st.error(f"세션 로드 실패: {e}")
 
-# --- [추가] 최상단에서 세션 로드 요청 처리 ---
 if 'session_to_load' in st.session_state:
     sess_name = st.session_state.pop('session_to_load')
     load_session_from_github(sess_name)
     st.rerun()
 
-# -------------------- 사이드바 (세션 기능 추가) --------------------
+# -------------------- 사이드바 (레이아웃 수정) --------------------
 with st.sidebar:
+    # [수정] Flexbox를 이용한 레이아웃
+    st.markdown("""
+    <style>
+        [data-testid="stSidebarUserContent"] {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 4rem); /* Adjust based on your top padding */
+        }
+        .sidebar-top-section {
+            flex-grow: 1;
+            overflow-y: auto; /* 대화 기록이 길어지면 스크롤 */
+        }
+        .sidebar-bottom-section {
+            flex-shrink: 0; /* 하단 섹션이 줄어들지 않도록 */
+        }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="sidebar-top-section">', unsafe_allow_html=True)
     if st.button("✨ 새 채팅", use_container_width=True, type="secondary"):
         st.session_state.clear()
         st.rerun()
 
     if st.session_state.chat and st.session_state.last_csv:
         if st.button("💾 현재 대화 저장", use_container_width=True):
-            save_current_session_to_github()
+            with st.spinner("세션 저장 중..."):
+                success, sess_name = save_current_session_to_github()
+            if success:
+                st.success(f"'{sess_name}' 저장 완료!")
+                time.sleep(2)
+                st.rerun()
 
     st.markdown("---")
     st.markdown("#### 대화 기록")
@@ -219,9 +233,7 @@ with st.sidebar:
         st.caption("GitHub 설정이 Secrets에 없습니다.")
     else:
         try:
-            with st.spinner("기록 로딩..."):
-                sessions = sorted(github_list_dir(GITHUB_REPO, GITHUB_BRANCH, "sessions", GITHUB_TOKEN), reverse=True)
-            
+            sessions = sorted(github_list_dir(GITHUB_REPO, GITHUB_BRANCH, "sessions", GITHUB_TOKEN), reverse=True)
             if not sessions:
                 st.caption("저장된 기록이 없습니다.")
             else:
@@ -230,18 +242,21 @@ with st.sidebar:
                         st.session_state.session_to_load = sess
                         st.rerun()
         except Exception as e:
-            st.error("대화 기록 로딩 실패")
+            st.error("기록 로딩 실패")
+    
+    st.markdown('</div>', unsafe_allow_html=True) # .sidebar-top-section 닫기
 
+    # 하단 고정 문의 섹션
+    st.markdown('<div class="sidebar-bottom-section">', unsafe_allow_html=True)
     st.markdown("""
-    <div style="position: absolute; bottom: 1rem; width: 90%;">
         <hr>
         <h3>📞 문의</h3>
         <p>미디어)디지털마케팅 데이터파트 김호범</p>
-    </div>
     """, unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------- 로직 (수정 없음) --------------------
-# (이하 로직은 이전 버전과 동일하므로 생략)
+# -------------------- 로직 (이하 수정 없음) --------------------
+# (이전 버전과 동일한 함수들)
 def scroll_to_bottom():
     st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
@@ -295,7 +310,7 @@ def render_chat():
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-class RotatingKeys: # ... (이하 모든 함수는 이전과 동일)
+class RotatingKeys:
     def __init__(self, keys, state_key: str, on_rotate=None):
         self.keys = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10]
         self.state_key = state_key
@@ -331,22 +346,6 @@ class RotatingYouTube:
                 self.rot.rotate(); self._build()
                 return factory(self.service).execute()
             raise
-
-LIGHT_PROMPT = (
-    "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
-    "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
-    "규칙:\n"
-    "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
-    "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
-    "출력(6줄 고정):\n"
-    "- 한 줄 요약: <문장>\n"
-    "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
-    "- 키워드: [<메인1>, <메인2>…]\n"
-    "- 엔티티/보조: [<보조들>]\n"
-    "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
-    "- 원문: {USER_QUERY}\n\n"
-    f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
-)
 
 def is_gemini_quota_error(exc: Exception) -> bool:
     msg = (str(exc) or "").lower()
