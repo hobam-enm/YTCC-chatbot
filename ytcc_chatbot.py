@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# 💬 유튜브 댓글분석기 — 순수 챗봇 모드 (세션 저장/로드 기능 추가)
+# 💬 유튜브 댓글분석기 — 순수 챗봇 모드 (세션 관리 기능 강화)
 
 import streamlit as st
 import pandas as pd
@@ -84,7 +84,7 @@ MAX_COMMENTS_PER_VID = 4_000
 
 # -------------------- 상태 --------------------
 def ensure_state():
-    defaults = {"chat":[], "last_schema":None, "last_csv":"", "last_df":None, "sample_text":""}
+    defaults = {"chat":[], "last_schema":None, "last_csv":"", "last_df":None, "sample_text":"", "loaded_session_name": None}
     for k, v in defaults.items():
         if k not in st.session_state: st.session_state[k] = v
 ensure_state()
@@ -119,12 +119,36 @@ def github_download_file(repo, branch, path_in_repo, token, local_path):
         return True
     return False
 
+# [추가] GitHub 파일/폴더 삭제 함수
+def github_delete_folder(repo, branch, folder_path, token):
+    # 1. 폴더 내용물 리스트업
+    contents_url = f"https://api.github.com/repos/{repo}/contents/{folder_path}?ref={branch}"
+    headers = _gh_headers(token)
+    resp = requests.get(contents_url, headers=headers)
+    if not resp.ok: return
+    
+    # 2. 각 파일 삭제
+    for item in resp.json():
+        delete_url = f"https://api.github.com/repos/{repo}/contents/{item['path']}"
+        data = {
+            "message": f"delete: {item['name']}",
+            "sha": item['sha'],
+            "branch": branch
+        }
+        requests.delete(delete_url, headers=headers, json=data)
+
 # --- 세션 관리 함수 ---
+# [수정] 세션 이름 규칙 변경 및 덮어쓰기 로직
 def _build_session_name() -> str:
+    # 이미 불러온 세션이 있다면 그 이름을 그대로 사용 (덮어쓰기 위함)
+    if st.session_state.get("loaded_session_name"):
+        return st.session_state.loaded_session_name
+
     schema = st.session_state.get("last_schema", {})
     kw = (schema.get("keywords", ["NoKeyword"]))[0]
     kw_slug = re.sub(r'[^\w-]', '', kw.replace(' ', '_'))[:20]
-    return f"{now_kst().strftime('%y%m%d_%H%M')}_{kw_slug}"
+    # 이름 규칙 변경: 주제키워드_세션생성시점
+    return f"{kw_slug}_{now_kst().strftime('%Y-%m-%d_%H%M')}"
 
 def save_current_session_to_github():
     if not all([GITHUB_REPO, GITHUB_TOKEN, st.session_state.chat, st.session_state.last_csv]):
@@ -138,8 +162,7 @@ def save_current_session_to_github():
     try:
         meta_path = os.path.join(local_dir, "qa.json")
         meta_data = {"chat": st.session_state.chat, "last_schema": st.session_state.last_schema}
-        with open(meta_path, "w", encoding="utf-8") as f:
-            json.dump(meta_data, f, ensure_ascii=False, indent=2)
+        with open(meta_path, "w", encoding="utf-8") as f: json.dump(meta_data, f, ensure_ascii=False, indent=2)
 
         comments_path = os.path.join(local_dir, "comments.csv")
         videos_path = os.path.join(local_dir, "videos.csv")
@@ -165,64 +188,56 @@ def load_session_from_github(sess_name: str):
             videos_ok = github_download_file(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}/videos.csv", GITHUB_TOKEN, os.path.join(local_dir, "videos.csv"))
 
             if not (qa_ok and comments_ok):
-                st.error("세션 핵심 파일(qa.json, comments.csv)을 불러오는 데 실패했습니다.")
-                return
+                st.error("세션 핵심 파일(qa.json, comments.csv)을 불러오는 데 실패했습니다."); return
 
-            st.session_state.clear()
-            ensure_state()
+            st.session_state.clear(); ensure_state()
             
             with open(os.path.join(local_dir, "qa.json"), "r", encoding="utf-8") as f: meta = json.load(f)
             
             st.session_state.update({
-                "chat": meta.get("chat", []),
-                "last_schema": meta.get("last_schema", None),
+                "chat": meta.get("chat", []), "last_schema": meta.get("last_schema", None),
                 "last_csv": os.path.join(local_dir, "comments.csv"),
                 "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
+                "loaded_session_name": sess_name, # [추가] 불러온 세션 이름 저장
             })
             st.session_state.sample_text, _, _ = serialize_comments_for_llm_from_file(st.session_state.last_csv)
         except Exception as e:
             st.error(f"세션 로드 실패: {e}")
 
+# --- 최상단에서 세션 로드/삭제 요청 처리 ---
 if 'session_to_load' in st.session_state:
     sess_name = st.session_state.pop('session_to_load')
     load_session_from_github(sess_name)
     st.rerun()
 
-# -------------------- 사이드바 --------------------
+if 'session_to_delete' in st.session_state:
+    sess_name = st.session_state.pop('session_to_delete')
+    with st.spinner(f"세션 '{sess_name}' 삭제 중..."):
+        github_delete_folder(GITHUB_REPO, GITHUB_BRANCH, f"sessions/{sess_name}", GITHUB_TOKEN)
+    st.success(f"세션 '{sess_name}' 삭제 완료.")
+    time.sleep(1)
+    st.rerun()
+
+# -------------------- 사이드바 (레이아웃 수정) --------------------
 with st.sidebar:
     st.markdown("""
     <style>
-        [data-testid="stSidebarUserContent"] {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 4rem);
-        }
-        .sidebar-top-section {
-            flex-grow: 1;
-            overflow-y: auto;
-        }
-        .sidebar-bottom-section {
-            flex-shrink: 0;
-        }
+        [data-testid="stSidebarUserContent"] { display: flex; flex-direction: column; height: calc(100vh - 4rem); }
+        .sidebar-top-section { flex-grow: 1; overflow-y: auto; }
+        .sidebar-bottom-section { flex-shrink: 0; }
     </style>
     """, unsafe_allow_html=True)
 
     st.markdown('<div class="sidebar-top-section">', unsafe_allow_html=True)
     if st.button("✨ 새 채팅", use_container_width=True, type="secondary"):
-        st.session_state.clear()
-        st.rerun()
+        st.session_state.clear(); st.rerun()
 
     if st.session_state.chat and st.session_state.last_csv:
         if st.button("💾 현재 대화 저장", use_container_width=True):
-            with st.spinner("세션 저장 중..."):
-                success, sess_name = save_current_session_to_github()
-            if success:
-                st.success(f"'{sess_name}' 저장 완료!")
-                time.sleep(2)
-                st.rerun()
+            with st.spinner("세션 저장 중..."): success, sess_name = save_current_session_to_github()
+            if success: st.success(f"'{sess_name}' 저장 완료!"); time.sleep(2); st.rerun()
 
-    st.markdown("---")
-    st.markdown("#### 대화 기록")
+    st.markdown("---"); st.markdown("#### 대화 기록")
 
     if not all([GITHUB_TOKEN, GITHUB_REPO]):
         st.caption("GitHub 설정이 Secrets에 없습니다.")
@@ -233,9 +248,11 @@ with st.sidebar:
                 st.caption("저장된 기록이 없습니다.")
             else:
                 for sess in sessions:
-                    if st.button(sess, key=f"sess_{sess}", use_container_width=True):
-                        st.session_state.session_to_load = sess
-                        st.rerun()
+                    col1, col2 = st.columns([0.85, 0.15])
+                    if col1.button(sess, key=f"sess_{sess}", use_container_width=True):
+                        st.session_state.session_to_load = sess; st.rerun()
+                    if col2.button("🗑️", key=f"del_{sess}", use_container_width=True):
+                        st.session_state.session_to_delete = sess; st.rerun()
         except Exception as e:
             st.error("기록 로딩 실패")
     
@@ -243,14 +260,12 @@ with st.sidebar:
 
     st.markdown('<div class="sidebar-bottom-section">', unsafe_allow_html=True)
     st.markdown("""
-        <hr>
-        <h3>📞 문의</h3>
-        <p>미디어)디지털마케팅 데이터파트 김호범</p>
+        <hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트 김호범</p>
     """, unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------- 로직 (핵심 변수 복원) --------------------
-def scroll_to_bottom():
+# -------------------- 로직 (이하 수정 없음) --------------------
+def scroll_to_bottom(): # ... (이하 모든 함수는 이전과 동일)
     st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 
 def render_metadata_and_downloads():
@@ -264,17 +279,8 @@ def render_metadata_and_downloads():
     except (ValueError, TypeError):
         start_dt_str = start_iso.split('T')[0] if start_iso else ""
         end_dt_str = end_iso.split('T')[0] if end_iso else ""
-
     with st.container(border=True):
-        st.markdown(
-            f"""
-            <div style="font-size:14px; color:#4b5563; line-height: 1.8;">
-                <span style='font-weight:600;'>키워드:</span> {', '.join(kw_main) if kw_main else '(없음)'}<br>
-                <span style='font-weight:600;'>기간:</span> {start_dt_str} ~ {end_dt_str} (KST)
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        st.markdown(f"""<div style="font-size:14px; color:#4b5563; line-height: 1.8;"><span style='font-weight:600;'>키워드:</span> {', '.join(kw_main) if kw_main else '(없음)'}<br><span style='font-weight:600;'>기간:</span> {start_dt_str} ~ {end_dt_str} (KST)</div>""", unsafe_allow_html=True)
         csv_path, df_videos = st.session_state.get("last_csv"), st.session_state.get("last_df")
         if csv_path and os.path.exists(csv_path) and df_videos is not None and not df_videos.empty:
             with open(csv_path, "rb") as f: comment_csv_data = f.read()
@@ -322,22 +328,7 @@ class RotatingYouTube:
                 return factory(self.service).execute()
             raise
 
-# [오류 수정] LIGHT_PROMPT 변수 정의 복원
-LIGHT_PROMPT = (
-    "역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n"
-    "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
-    "규칙:\n"
-    "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
-    "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
-    "출력(6줄 고정):\n"
-    "- 한 줄 요약: <문장>\n"
-    "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
-    "- 키워드: [<메인1>, <메인2>…]\n"
-    "- 엔티티/보조: [<보조들>]\n"
-    "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
-    "- 원문: {USER_QUERY}\n\n"
-    f"현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}"
-)
+LIGHT_PROMPT = (f"역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n규칙:\n- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n출력(6줄 고정):\n- 한 줄 요약: <문장>\n- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n- 키워드: [<메인1>, <메인2>…]\n- 엔티티/보조: [<보조들>]\n- 옵션: {{ include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }}\n- 원문: {{USER_QUERY}}\n\n현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}")
 
 def is_gemini_quota_error(exc: Exception) -> bool:
     msg = (str(exc) or "").lower()
@@ -357,10 +348,9 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload, tim
                     if hasattr(p0, "text"): return p0.text
             return ""
         except Exception as e:
-            if is_gemini_quota_error(e) and len(rk.keys) > 1:
-                rk.rotate(); continue
+            if is_gemini_quota_error(e) and len(rk.keys) > 1: rk.rotate(); continue
             raise
-    return "" # Should not be reached if keys exist
+    return ""
 
 def parse_light_block_to_schema(light_text: str) -> dict:
     raw = (light_text or "").strip()
@@ -555,11 +545,9 @@ if prompt := st.chat_input("예) 최근 24시간 태풍상사 김준호 반응 �
 
 if st.session_state.chat and st.session_state.chat[-1]["role"] == "user":
     user_query = st.session_state.chat[-1]["content"]
-
     if not st.session_state.get("last_csv"):
         response = run_pipeline_first_turn(user_query)
     else:
         response = run_followup_turn(user_query)
-    
     st.session_state.chat.append({"role": "assistant", "content": response})
     st.rerun()
