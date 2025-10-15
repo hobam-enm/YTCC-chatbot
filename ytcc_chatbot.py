@@ -19,7 +19,7 @@ from streamlit.components.v1 import html as st_html
 
 # -------------------- 페이지/전역 --------------------
 # 사이드바 열림으로 고정 요청 반영 (initial_sidebar_state="expanded")
-st.set_page_config(page_title="💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="###💬 유튜브 댓글분석기: 챗봇", layout="wide", initial_sidebar_state="expanded")
 
 # 챗봇 UI 느낌을 위해 제목 제거 및 페이지 상하좌우 패딩 최소화 CSS 주입 (요청하신 UI는 유지)
 st.markdown("""
@@ -107,7 +107,7 @@ with st.sidebar:
 
             st.markdown("---")
             st.download_button(
-                label="⬇️ 댓글 데이터 다운로드드",
+                label="⬇️ 댓글 데이터 다운로드",
                 data=csv_data,
                 file_name=file_name,
                 mime="text/csv",
