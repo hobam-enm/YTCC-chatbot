@@ -231,7 +231,7 @@ if 'session_to_rename' in st.session_state:
             except Exception as e: st.error(f"변경 실패: {e}")
         time.sleep(1); st.rerun()
 
-# --- 사이드바 ---
+# -------------------- 사이드바 --------------------
 with st.sidebar:
     st.markdown(f'<h2 style="font-weight: 600; font-size: 1.6rem; margin-bottom: 1.5rem; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">💬 유튜브 댓글분석: AI 챗봇</h2>', unsafe_allow_html=True)
     st.markdown("""<style>[data-testid="stSidebarUserContent"] { display: flex; flex-direction: column; height: calc(100vh - 4rem); } .sidebar-top-section { flex-grow: 1; overflow-y: auto; } .sidebar-bottom-section { flex-shrink: 0; }</style>""", unsafe_allow_html=True)
@@ -273,7 +273,7 @@ with st.sidebar:
     st.markdown("""<hr><h3>📞 문의</h3><p>미디어)디지털마케팅 데이터파트 김호범</p>""", unsafe_allow_html=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------- 로직 (이하 복원 및 수정 없음) --------------------
+# -------------------- 로직 (이하 복원) --------------------
 def scroll_to_bottom(): st_html("<script> let last_message = document.querySelectorAll('.stChatMessage'); if (last_message.length > 0) { last_message[last_message.length - 1].scrollIntoView({behavior: 'smooth'}); } </script>", height=0)
 def render_metadata_and_downloads():
     if not (schema := st.session_state.get("last_schema")): return
@@ -294,6 +294,36 @@ def render_metadata_and_downloads():
 def render_chat():
     for msg in st.session_state.chat:
         with st.chat_message(msg["role"]): st.markdown(msg["content"])
+
+class RotatingKeys:
+    def __init__(self, keys, state_key: str, on_rotate=None):
+        self.keys, self.state_key, self.on_rotate = [k.strip() for k in (keys or []) if isinstance(k, str) and k.strip()][:10], state_key, on_rotate
+        idx = st.session_state.get(state_key, 0)
+        self.idx = 0 if not self.keys else (idx % len(self.keys))
+        st.session_state[state_key] = self.idx
+    def current(self): return self.keys[self.idx % len(self.keys)] if self.keys else None
+    def rotate(self):
+        if not self.keys: return
+        self.idx = (self.idx + 1) % len(self.keys)
+        st.session_state[self.state_key] = self.idx
+        if callable(self.on_rotate): self.on_rotate(self.idx, self.current())
+
+class RotatingYouTube:
+    def __init__(self, keys, state_key="yt_key_idx"):
+        self.rot, self.service = RotatingKeys(keys, state_key), None
+        self._build()
+    def _build(self):
+        if not (key := self.rot.current()): raise RuntimeError("YouTube API Key가 비어 있습니다.")
+        self.service = build("youtube", "v3", developerKey=key)
+    def execute(self, factory):
+        try: return factory(self.service).execute()
+        except HttpError as e:
+            status, msg = getattr(getattr(e, 'resp', None), 'status', None), (getattr(e, 'content', b'').decode('utf-8', 'ignore') or '').lower()
+            if status in (403, 429) and any(t in msg for t in ["quota", "rate", "limit"]) and len(YT_API_KEYS) > 1:
+                self.rot.rotate(); self._build()
+                return factory(self.service).execute()
+            raise
+
 LIGHT_PROMPT = (f"역할: 유튜브 댓글 반응 분석기의 자연어 해석가.\n목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n규칙:\n- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n- '키워드'는 검색에 사용할 가장 핵심적인 주제(프로그램, 브랜드 등) 1개로 한정한다.\n- '엔티티/보조'는 키워드 검색 결과 내에서 분석의 초점이 될 인물, 세부 주제 등을 포함한다.\n- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n출력(6줄 고정):\n- 한 줄 요약: <문장>\n- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n- 키워드: [<핵심 키워드 1개>]\n- 엔티티/보조: [<인물>, <세부 주제 등>]\n- 옵션: {{ include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }}\n- 원문: {{USER_QUERY}}\n\n현재 KST: {to_iso_kst(now_kst())}\n입력:\n{{USER_QUERY}}")
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload, timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
@@ -466,6 +496,8 @@ def run_followup_turn(user_query: str):
     payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n[댓글 샘플]:\n{sample_text}\n"
     with st.spinner("💬 AI가 답변을 구성 중입니다..."): response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
     return response
+
+# -------------------- 메인 화면 및 실행 로직 --------------------
 if not st.session_state.chat:
     st.markdown("""<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; height: 70vh;"><h1 style="font-size: 3.5rem; font-weight: 600; background: -webkit-linear-gradient(45deg, #4285F4, #9B72CB, #D96570, #F2A60C); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">유튜브 댓글분석: AI 챗봇</h1><p style="font-size: 1.2rem; color: #4b5563;">드라마, 배우를 주제로 대화를 시작하세요</p><div style="margin-top: 3rem; padding: 1rem 1.5rem; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #fafafa; max-width: 600px;"><h4 style="margin-bottom: 1rem; font-weight: 600;">⚠️ 사용 주의사항</h4><ol style="text-align: left; padding-left: 20px;"><li><strong>첫 질문 시</strong> 댓글 수집 및 AI 분석에 다소 시간이 소요될 수 있습니다.</li><li>한 세션에서는 <strong>하나의 주제</strong>와 관련된 질문만 진행해야 분석 정확도가 유지됩니다.</li><li>첫 질문에는 기간을 명시해주세요 (ex.최근 48시간 / 5월 1일부터).</li></ol></div></div>""", unsafe_allow_html=True)
 else:
