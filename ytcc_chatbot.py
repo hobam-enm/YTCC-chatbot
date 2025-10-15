@@ -488,13 +488,28 @@ def run_pipeline_first_turn(user_query: str):
     answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
     prog_bar.progress(1.0, text="완료"); time.sleep(0.5); prog_bar.empty()
     return tidy_answer(answer_md_raw)
+
+
 def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")): return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
+    
     sample_text = st.session_state.get("sample_text", "")
     context = "\n".join(f"[이전 {'Q' if m['role'] == 'user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
-    sys = "너는 유튜브 댓글 분석가다. 주어진 댓글 샘플과 이전 대화 맥락을 바탕으로 현재 질문에 답하라. 반드시 댓글 샘플을 근거로 답하고, 인용은 5개 이하로 하라. 사용자에게 이전대화를 참고했다는 것을 명시적으로 밝히지 말아라. 구체적으로 대답하라."
+    
+    # [수정] 챗봇의 대화 흐름을 강조하는 프롬프트
+    sys = (
+        "너는 사용자와 대화하며 유튜브 댓글을 분석해주는 챗봇 어시스턴트다. "
+        "이전 대화는 방금 나눈 대화 내용이므로, 그 흐름을 자연스럽게 이어서 답변해야 한다. "
+        "만약 사용자가 '자세히 알려줘' 또는 '구체적으로'와 같이 짧게 질문하면, 이는 바로 직전 너의 답변에 대한 추가 설명을 요청하는 것이다. "
+        "직전 답변의 내용을 주어진 댓글 샘플을 근거로 더 상세하게 풀어서 설명해줘. "
+        "모든 답변은 반드시 댓글 샘플을 기반으로 해야 하며, 인용은 5개 이하로 제한하라."
+    )
+
     payload = f"{context}\n\n[현재 질문]: {user_query}\n[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n[댓글 샘플]:\n{sample_text}\n"
-    with st.spinner("💬 AI가 답변을 구성 중입니다..."): response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
+    
+    with st.spinner("💬 AI가 답변을 구성 중입니다..."):
+        response = tidy_answer(call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload))
+        
     return response
 
 # -------------------- 메인 화면 및 실행 로직 --------------------
