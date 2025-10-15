@@ -185,11 +185,13 @@ LIGHT_PROMPT = (
     "목표: 한국어 입력에서 [기간(KST)]과 [키워드/엔티티/옵션]을 해석.\n"
     "규칙:\n"
     "- 기간은 Asia/Seoul 기준, 상대기간의 종료는 지금.\n"
+    "- **키워드는 분석의 가장 핵심이 되는 주제(IP, 프로그램명, 배우이름, 등장인물 이름 등) 1개로 한정하고, 나머지는 엔티티로 분류하라.**\n"
+    "- **프로그램명과 인물명이 동시에 나올경우, 프로그램명이 우선 키워드이다"
     "- 옵션 탐지: include_replies, channel_filter(any|official|unofficial), lang(ko|en|auto).\n\n"
     "출력(6줄 고정):\n"
     "- 한 줄 요약: <문장>\n"
     "- 기간(KST): <YYYY-MM-DDTHH:MM:SS+09:00> ~ <YYYY-MM-DDTHH:MM:SS+09:00>\n"
-    "- 키워드: [<메인1>, <메인2>…]\n"
+    "- 키워드: [<메인1>]\n"
     "- 엔티티/보조: [<보조들>]\n"
     "- 옵션: { include_replies: true|false, channel_filter: \"any|official|unofficial\", lang: \"ko|en|auto\" }\n"
     "- 원문: {USER_QUERY}\n\n"
@@ -251,6 +253,10 @@ def parse_light_block_to_schema(light_text: str) -> dict:
         if ir: options["include_replies"] = (ir.group(1).lower()=="true")
         if cf: options["channel_filter"] = cf.group(1)
         if lg: options["lang"] = lg.group(1)
+    
+    # **[추가] 원문 추출 로직**
+    m_orig = re.search(r"원문\s*:\s*(.*)", raw)
+    original_query = m_orig.group(1).strip() if m_orig else ""
 
     if not start_iso or not end_iso:
         end_dt = now_kst(); start_dt = end_dt - timedelta(hours=24)
@@ -259,7 +265,11 @@ def parse_light_block_to_schema(light_text: str) -> dict:
         m = re.findall(r"[가-힣A-Za-z0-9]{2,}", raw)
         keywords = [m[0]] if m else ["유튜브"]
 
-    return {"start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, "entities": entities, "options": options, "raw": raw}
+    return {
+        "start_iso": start_iso, "end_iso": end_iso, "keywords": keywords, 
+        "entities": entities, "options": options, "raw": raw,
+        "original_query": original_query # **[추가] 결과에 원문 포함**
+    }
 
 def yt_search_videos(rt, keyword, max_results, order="relevance", published_after=None, published_before=None):
     video_ids, token = [], None
@@ -485,9 +495,11 @@ def run_pipeline_first_turn(user_query: str):
     prog.progress(0.90, text="AI 분석중…")
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
     sys = ("너는 유튜브 댓글을 분석하는 어시스턴트다. "
-           "아래 키워드/엔티티와 지정된 기간의 댓글 샘플을 바탕으로 핵심 포인트를 항목화하고, "
+           "먼저 아래 [사용자 원본 질문]의 핵심 의도(특정 인물, 긍/부정 등)를 파악한 뒤, "
+           "주어진 키워드/엔티티와 댓글 샘플을 바탕으로 해당 의도에 맞춰 핵심 포인트를 항목화하고, "
            "긍/부/중 비율과 대표 코멘트(10개 미만)를 제시하라.")
     payload = (
+        f"[사용자 원본 질문]: {schema.get('original_query', user_query)}\n"
         f"[키워드]: {', '.join(kw_main)}\n"
         f"[엔티티]: {', '.join(kw_ent)}\n"
         f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
