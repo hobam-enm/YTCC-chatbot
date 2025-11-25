@@ -898,7 +898,8 @@ def serialize_comments_for_llm_from_file(csv_path: str,
 
         text = str(r.get("text", "") or "").replace("\n", " ")
         prefix = f"[{'R' if int(r.get('isReply', 0)) == 1 else 'T'}|♥{int(r.get('likeCount', 0))}] "
-        prefix += f"{str(r.get('author', '')).replace('\n', ' ')}: "
+        author_clean = str(r.get('author', '')).replace('\n', ' ')
+        prefix += f"{author_clean}: "
         body = text[:max_chars_per_comment] + '…' if len(text) > max_chars_per_comment else text
 
         line = prefix + body
