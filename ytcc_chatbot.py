@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-# 💬 유튜브 댓글분석기 — 순수 챗봇 모드 (세션 관리 기능 최종 + URL 수집 케이스 1~3 반영)
 
 # region [Imports & Setup]
 import streamlit as st
@@ -813,7 +811,6 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
     sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
     st.session_state["sample_text"] = sample_text
 
-    # [프롬프트 업데이트] 욕설 마스킹 및 안전 지침 추가
     sys = (
         "역할: 너는 유튜브 댓글을 기반으로 여론을 읽어내는 '리서치 애널리스트'다.\n"
         "감정 과장은 빼고, 데이터 기반 보고서처럼 **냉정하고 구조적으로** 써라.\n\n"
@@ -880,7 +877,6 @@ def run_followup_turn(user_query: str):
     sample_text = st.session_state.get("sample_text", "")
     context = "\n".join(f"[이전 {'Q' if m['role'] == 'user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
 
-    # [프롬프트 업데이트] 조사관 페르소나 + 안전 지침
     sys = (
         "역할: 너는 이미 한 번 요약된 유튜브 댓글 데이터를 바탕으로\n"
         "사용자의 추가 질문에 대해 '수사 보고서'처럼 구체적인 근거를 제시하는 수석 조사관이다.\n\n"
