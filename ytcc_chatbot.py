@@ -419,32 +419,34 @@ def serialize_comments_for_llm_from_file(csv_path: str,
     return "\n".join(lines), len(lines), total_chars
 
 def tidy_answer(md: str) -> str:
-    """
-    AI 답변 상단에 불필요하게 붙는 '유튜브 댓글 분석 결과' 같은 제목만 제거하고,
-    나머지 마크다운 헤더(###)는 살려둡니다. (마크다운 파괴 방지)
-    """
     if not md:
         return ""
     
+    original = md  # ← 원본 백업
+
     lines = md.splitlines()
     cleaned = []
     
-    # "유튜브 댓글 분석" 같은 뻔한 제목만 지우기 위한 정규식
     REMOVE_PATTERN = re.compile(r"유튜브\s*댓글\s*분석|보고서\s*작성|분석\s*결과", re.IGNORECASE)
 
     for line in lines:
         if not line.strip():
             cleaned.append(line)
             continue
-            
-        # 1. 뻔한 제목이 포함된 줄이면 스킵 (내용이 긴 문장은 제외)
+
         if REMOVE_PATTERN.search(line) and len(line) < 50:
             continue
-            
-        # 2. 그 외의 정상적인 내용(소제목 포함)은 보존
+
         cleaned.append(line)
 
-    return "\n".join(cleaned).strip()
+    result = "\n".join(cleaned).strip()
+
+    # 🔴 만약 청소 후에 싹 비었다면, 차라리 원본이라도 돌려준다
+    if not result:
+        return original.strip()
+
+    return result
+
 
 YTB_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 
@@ -479,7 +481,7 @@ def strip_urls(s: str) -> str:
 # [UI 디버깅용] Gemini 호출 함수 (화면에 차단 사유 직접 출력)
 # ==============================================================================
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
-                         timeout_s=120, max_tokens=2048) -> str:
+                         timeout_s=120, max_tokens=5096) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current():
         raise RuntimeError("Gemini API Key가 비어 있습니다.")
