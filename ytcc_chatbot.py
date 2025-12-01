@@ -139,7 +139,7 @@ def kst_to_rfc3339_utc(dt_kst: datetime) -> str:
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-GEMINI_MODEL      = "gemini-2.5-flash"
+GEMINI_MODEL      = "gemini-2.5-flash-lite"
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
