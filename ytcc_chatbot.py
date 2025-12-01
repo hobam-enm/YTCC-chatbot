@@ -139,7 +139,7 @@ def kst_to_rfc3339_utc(dt_kst: datetime) -> str:
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-GEMINI_MODEL      = "gemini-2.5-flash-lite"
+GEMINI_MODEL      = "gemini-2.5-flash"
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
@@ -1073,7 +1073,7 @@ def run_pipeline_first_turn(user_query: str,
         "- 인용한 댓글 외에 가짜 내용을 지어내지 말 것.\n"
         "- 중언부언하지 말고 개조식으로 명료하게 작성."
     )
-    
+
     payload = (
         f"[사용자 원본 질문]: {user_query}\n\n"
         f"[키워드]: {', '.join(kw_main)}\n"
