@@ -604,36 +604,68 @@ LIGHT_PROMPT = (
 )
 
 
+# ==============================================================================
+# [수정] Gemini 호출 함수 (안전 설정 추가 + 에러 핸들링 강화)
+# ==============================================================================
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                          timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current():
         raise RuntimeError("Gemini API Key가 비어 있습니다.")
 
+    # 댓글 분석용이므로 안전 설정을 최대한 완화 (BLOCK_NONE)
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
+    
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
+
     for _ in range(len(rk.keys) or 1):
         try:
             genai.configure(api_key=rk.current())
             model = genai.GenerativeModel(
                 model_name,
-                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens}
+                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens},
+                system_instruction=system_instruction  # 시스템 프롬프트 명시적 전달
             )
+            
             resp = model.generate_content(
-                [system_instruction, user_payload],
-                request_options={"timeout": timeout_s}
+                user_payload,
+                request_options={"timeout": timeout_s},
+                safety_settings=safety_settings  # 안전 설정 적용
             )
-            if out := getattr(resp, "text", None):
-                return out
+            
+            # 안전 필터 등으로 인해 text 접근 시 에러가 나는 경우를 방어
+            try:
+                if getattr(resp, "text", None):
+                    return resp.text
+            except ValueError:
+                # 텍스트 생성 거부된 경우 (Safety Filter 등)
+                if resp.prompt_feedback:
+                    return f"⚠️ [AI 답변 거부] 안전 필터에 의해 차단되었습니다. (사유: {resp.prompt_feedback})"
+                return "⚠️ [AI 답변 오류] 생성된 텍스트가 없습니다."
+
+            # 후보군(candidate)에서 텍스트 추출 시도
             if c0 := (getattr(resp, "candidates", None) or [None])[0]:
                 if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
                     if hasattr(p0, "text"):
                         return p0.text
+            
             return ""
 
         except Exception as e:
-            if "429" in str(e).lower() and len(rk.keys) > 1:
-                rk.rotate()
-                continue
-            raise
+            # 429(Quota) 에러인 경우에만 키 교체 후 재시도
+            msg = str(e).lower()
+            if "429" in msg or "quota" in msg:
+                if len(rk.keys) > 1:
+                    rk.rotate()
+                    continue
+            # 그 외 에러는 로그만 남기고 빈 문자열 반환하거나 에러 메시지 반환
+            print(f"Gemini API Error: {e}")
+            raise e
 
     return ""
 
