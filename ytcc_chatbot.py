@@ -547,11 +547,21 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 if finish_reason == 2:
                     st.caption("-> 원인: Max Token 초과 (답변이 너무 길어서 잘림)")
 
-            # 5. 텍스트 정상 추출
+            # 5. 텍스트 정상 추출 시도
             if hasattr(candidate.content, 'parts') and candidate.content.parts:
                 return candidate.content.parts[0].text
             else:
-                st.error("⚠️ [내용 없음] 차단되지는 않았으나 텍스트가 비어있습니다.")
+                # [수정] 도대체 뭘 보냈는지 원본 데이터를 화면에 뿌려봅니다.
+                st.error("⚠️ [미스터리 오류] 차단 코드는 없는데 텍스트가 비어있습니다.")
+                st.write("▼ AI가 보낸 원본 데이터 (JSON):")
+                
+                # 응답 객체를 딕셔너리로 변환해서 보여줌 (디버깅용)
+                try:
+                    # candidate 객체의 내용을 있는 그대로 출력
+                    st.json(type(candidate).to_dict(candidate))
+                except:
+                    st.write(candidate)
+                
                 return "⚠️ [오류] 생성된 텍스트가 없습니다."
 
         except Exception as e:
