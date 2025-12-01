@@ -469,7 +469,7 @@ def strip_urls(s: str) -> str:
 
 # region [API Integrations: Gemini & YouTube]
 # ==============================================================================
-# [Gemini 호출 함수] - 안전 필터 해제, 에러 핸들링, 디버깅 로그 강화
+# [UI 디버깅용] Gemini 호출 함수 (화면에 차단 사유 직접 출력)
 # ==============================================================================
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                          timeout_s=120, max_tokens=2048) -> str:
@@ -477,10 +477,9 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
     if not rk.current():
         raise RuntimeError("Gemini API Key가 비어 있습니다.")
 
-    # [핵심] system_instruction이 빈 문자열("")이면 None으로 변환 (라이브러리 에러 방지)
     real_sys_inst = None if (not system_instruction or not system_instruction.strip()) else system_instruction
 
-    # [핵심] 안전 설정 해제 (BLOCK_NONE) - 댓글 분석 시 과도한 차단 방지
+    # 안전 설정
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
     safety_settings = {
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -498,47 +497,62 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 system_instruction=real_sys_inst 
             )
             
+            # API 호출
             resp = model.generate_content(
                 user_payload,
                 request_options={"timeout": timeout_s},
                 safety_settings=safety_settings 
             )
             
-            # --- 디버깅 로그 (답변 없을 때 원인 파악용) ---
-            if not resp:
-                print("❌ [DEBUG] 응답 객체(resp)가 비어있습니다.")
-                return "⚠️ AI 응답 없음"
-
+            # -----------------------------------------------------------
+            # 🕵️‍♂️ [UI 디버깅] 화면에 바로 진단서 출력
+            # -----------------------------------------------------------
+            
+            # 1. 입력 자체가 차단된 경우 (Prompt Feedback)
             if resp.prompt_feedback:
                 if resp.prompt_feedback.block_reason:
-                    print(f"🛑 [DEBUG] 입력 차단(Prompt Blocked): {resp.prompt_feedback.block_reason}")
+                    reason = resp.prompt_feedback.block_reason
+                    st.error(f"🛑 [입력 차단] 질문(댓글 데이터) 자체가 막혔습니다!\n사유: {reason}")
+                    return "⚠️ [시스템] 질문 내용이 너무 위험하여 전송되지 않았습니다."
 
+            # 2. 결과 후보군이 없는 경우
             if not resp.candidates:
-                 print("❌ [DEBUG] 생성된 후보군(Candidates)이 0개입니다.")
-            else:
-                finish_reason = resp.candidates[0].finish_reason
-                # 1=STOP(정상), 2=MAX_TOKENS, 3=SAFETY(안전차단), 4=RECITATION
-                if finish_reason != 1: 
-                    print(f"⚠️ [DEBUG] 비정상 종료 발생! 사유 코드: {finish_reason}")
+                st.error("❌ [오류] 생성된 답변 후보가 0개입니다. (강제 차단됨)")
+                return "⚠️ [시스템] 답변 생성 실패"
 
-            # 텍스트 추출 시도 (에러 방어)
-            try:
-                if getattr(resp, "text", None):
-                    return resp.text
-            except ValueError:
-                # 텍스트 생성 거부된 경우
-                if resp.prompt_feedback:
-                    blocked_msg = f"⚠️ [AI 답변 차단] 안전 필터 사유: {resp.prompt_feedback}"
-                    print(blocked_msg) 
-                    return blocked_msg 
+            candidate = resp.candidates[0]
+            finish_reason = candidate.finish_reason
             
-            # 후보군(candidate) 직접 파싱 시도
-            if c0 := (getattr(resp, "candidates", None) or [None])[0]:
-                if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
-                    if hasattr(p0, "text"):
-                        return p0.text
-            
-            return "⚠️ [시스템] AI 답변을 생성하지 못했습니다. (내용 과다 또는 안전 정책 차단)"
+            # 3. 안전 차단 (SAFETY) 발생 시 -> 상세 리포트 출력
+            if finish_reason == 3: # 3 = SAFETY
+                st.error("🚨 [치명적 차단] 안전 필터(Safety Filter)가 답변을 삭제했습니다.")
+                
+                # 안전 등급 표 만들기
+                safety_data = []
+                for rating in candidate.safety_ratings:
+                    safety_data.append({
+                        "카테고리 (Category)": rating.category.name.replace("HARM_CATEGORY_", ""),
+                        "위험도 (Probability)": rating.probability.name,
+                        "차단여부": "🔴 차단원인" if rating.probability.name in ["HIGH", "MEDIUM"] else "🟢 통과"
+                    })
+                
+                # 화면에 표로 보여줌
+                st.dataframe(pd.DataFrame(safety_data), use_container_width=True)
+                
+                return "⚠️ [차단됨] 안전 정책(욕설/선정성/혐오)에 의해 답변이 삭제되었습니다. (위의 붉은 로그를 확인하세요)"
+
+            # 4. 그 외 비정상 종료
+            if finish_reason != 1: # 1 = STOP (정상)
+                st.warning(f"⚠️ [비정상 종료] 답변이 완료되지 않았습니다. (사유 코드: {finish_reason})")
+                if finish_reason == 2:
+                    st.caption("-> 원인: Max Token 초과 (답변이 너무 길어서 잘림)")
+
+            # 5. 텍스트 정상 추출
+            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                return candidate.content.parts[0].text
+            else:
+                st.error("⚠️ [내용 없음] 차단되지는 않았으나 텍스트가 비어있습니다.")
+                return "⚠️ [오류] 생성된 텍스트가 없습니다."
 
         except Exception as e:
             msg = str(e).lower()
@@ -546,7 +560,7 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 if len(rk.keys) > 1:
                     rk.rotate()
                     continue
-            print(f"Gemini API Error: {e}")
+            st.error(f"🔥 [API 에러 발생]: {e}") # 화면에 에러 출력
             raise e
 
     return ""
