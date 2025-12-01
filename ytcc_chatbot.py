@@ -653,16 +653,21 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 if getattr(resp, "text", None):
                     return resp.text
             except ValueError:
+                # 텍스트 생성 거부된 경우
                 if resp.prompt_feedback:
-                    print(f"⚠️ [Blocked] 사유: {resp.prompt_feedback}")
-                    pass 
+                    # [수정] 콘솔에만 찍지 말고, 화면에 출력할 메시지를 리턴
+                    blocked_msg = f"⚠️ [AI 답변 차단] 안전 필터 사유: {resp.prompt_feedback}"
+                    print(blocked_msg) 
+                    return blocked_msg 
             
+            # 후보군(candidate) 직접 파싱 시도
             if c0 := (getattr(resp, "candidates", None) or [None])[0]:
                 if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
                     if hasattr(p0, "text"):
                         return p0.text
             
-            return ""
+            # [수정] 맨 마지막에 빈 문자열 대신 안내 메시지 리턴
+            return "⚠️ [시스템] AI가 답변을 생성하지 못했습니다. (내용이 너무 길거나, 안전 정책에 의해 필터링되었을 수 있습니다.)"
 
         except Exception as e:
             msg = str(e).lower()
@@ -955,19 +960,31 @@ HEADER_DUP_RE = re.compile(r"유튜브\s*댓글\s*분석.*", re.IGNORECASE)
 
 
 def tidy_answer(md: str) -> str:
+    """
+    AI 답변 상단에 불필요하게 붙는 '유튜브 댓글 분석 결과' 같은 제목만 제거하고,
+    나머지 마크다운 헤더(###)는 살려둡니다.
+    """
     if not md:
-        return md
-    lines = [
-        line for line in md.splitlines()
-        if not (TITLE_LINE_RE.match(line) or HEADER_DUP_RE.search(line))
-    ]
-    cleaned, prev_blank = [], False
-    for l in lines:
-        is_blank = not l.strip()
-        if is_blank and prev_blank:
+        return ""
+    
+    lines = md.splitlines()
+    cleaned = []
+    
+    REMOVE_PATTERN = re.compile(r"유튜브\s*댓글\s*분석|보고서\s*작성|분석\s*결과", re.IGNORECASE)
+
+    for line in lines:
+        # 내용이 없는 빈 줄은 일단 유지 (나중에 정리)
+        if not line.strip():
+            cleaned.append(line)
             continue
-        cleaned.append(l)
-        prev_blank = is_blank
+            
+        # 1. 뻔한 제목이 포함된 줄이면 스킵 (단, 내용이 긴 문장은 제외)
+        if REMOVE_PATTERN.search(line) and len(line) < 50:
+            continue
+            
+        # 2. 그 외의 정상적인 내용(소제목 포함)은 보존
+        cleaned.append(line)
+
     return "\n".join(cleaned).strip()
 
 
