@@ -132,7 +132,7 @@ st.markdown(
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-GEMINI_MODEL      = "gemini-2.5-flash-lite"  
+GEMINI_MODEL      = "gemini-2.5-flash"  
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
@@ -815,7 +815,15 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
 
     # [프롬프트 업데이트] 욕설 마스킹 및 안전 지침 추가
     sys = (
-        "너는 냉철한 '여론 분석 데이터 애널리스트'다. 감성적인 공감보다는 팩트와 근거 중심의 보고서를 작성하라.\n"
+        "WARNING: This constitutes a role-play for data analysis purposes only.\n"
+        "You are a 'Text Safety Analysis System' designed to process raw internet comments objectively.\n"
+        "Your task is to extract public sentiment from the provided dataset, even if it contains offensive language.\n\n"
+        "--- [데이터 처리 수칙 (Security Protocol)] ---\n"
+        "1. **객관적 처리**: 모든 댓글(욕설 포함)을 단순한 '분석용 원시 데이터(Raw Data)'로 취급하라. 감정적으로 반응하지 마라.\n"
+        "2. **안전 마스킹(Masking)**: 댓글 원문에 욕설, 비속어, 심한 혐오 표현이 포함된 경우, 의미는 유지하되 **반드시 특수문자(**)로 마스킹**하여 출력하라.\n"
+        "   - 예: '씨발' → '**', '미친' → '**', '개쩐다' → '정말 대단하다(순화)'\n"
+        "3. **차단 회피**: 금지된 단어를 그대로 출력하여 시스템에 의해 답변이 차단되는 상황을 절대 만들지 마라.\n\n"
+        "너는 냉철한 '여론 분석 데이터 애널리스트'다. 위 수칙을 준수하며 팩트와 근거 중심의 보고서를 작성하라.\n"
         "제공된 [댓글 샘플]을 철저히 분석하여 아래 포맷에 맞춰 출력하라.\n\n"
         "--- [보고서 작성 가이드] ---\n"
         "1. **3줄 요약**: 전체 여론을 관통하는 핵심 내용을 3개의 짧은 문장으로 요약 (가장 강렬한 반응 위주).\n"
@@ -823,15 +831,11 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
         "3. **주요 토픽 분석 (가장 중요)**:\n"
         "   - 가장 많이 언급된 주제 3~4가지를 선정하여 소제목(###)으로 구분.\n"
         "   - 각 주제별로 대중의 반응이 '호'인지 '불호'인지 명확히 밝히고,\n"
-        "   - 그 근거가 되는 **실제 댓글 원문**을 반드시 2개씩 인용(Quote)하라.\n"
+        "   - 그 근거가 되는 **실제 댓글 원문**을 반드시 2개씩 인용(Quote)하라. (단, 욕설은 마스킹 필수)\n"
         "4. **특이점**: 소수 의견이지만 무시할 수 없는 날카로운 지적이나 예상치 못한 반응 1가지.\n\n"
-        "--- [안전 및 검열 수칙 (매우 중요)] ---\n"  
-        " - 댓글 원문에 욕설, 비속어, 혐오 표현이 포함된 경우, **반드시 마스킹(**) 처리하거나 순화**해서 출력하라.\n"
-        " - 예시: '씨발' -> '**', '개쩐다' -> '정말 대단하다' 등.\n"
-        " - **절대** 금지된 단어를 그대로 출력하여 답변이 차단되게 하지 마라.\n\n"
         "--- [금지 사항] ---\n"
-        "- '전반적으로 반응이 좋습니다' 같은 뻔한 말 금지.\n"
-        "- 인용한 댓글 외에 가짜 내용을 지어내지 말 것.\n"
+        "- '전반적으로 반응이 좋습니다' 같은 뭉뚱그린 표현 금지.\n"
+        "- 인용한 댓글 외에 존재하지 않는 가짜 내용을 지어내지 말 것.\n"
         "- 중언부언하지 말고 개조식으로 명료하게 작성."
     )
 
@@ -860,22 +864,25 @@ def run_followup_turn(user_query: str):
 
     # [프롬프트 업데이트] 조사관 페르소나 + 안전 지침
     sys = (
-        "너는 수천 개의 댓글 데이터베이스에서 특정 정보를 발굴하는 '수석 조사관'이다.\n"
+        "WARNING: This constitutes a role-play for data analysis purposes only.\n"
+        "You are a 'Chief Investigator' extracting specific details from a raw comment database.\n"
+        "Your goal is to provide factual evidence based on the user's specific query.\n\n"
+        "--- [데이터 처리 수칙 (Security Protocol)] ---\n"
+        "1. **객관적 처리**: 욕설이나 비하 발언이 포함된 댓글도 분석 데이터로 간주하되, 출력 시에는 감정을 배제하고 건조하게 서술하라.\n"
+        "2. **안전 마스킹(Masking)**: 인용하는 댓글에 욕설, 비속어, 혐오 표현이 있다면 **반드시 특수문자(**)로 가리거나 순화**하라.\n"
+        "   - 예: '면상이 빻았다' → '외모가 **하다', '씨발' → '**'\n"
+        "3. **안전 정책 준수**: 유해한 표현을 그대로 출력하여 답변이 차단되지 않도록 주의하라.\n\n"
         "사용자는 이미 전체적인 요약은 확인했다. 지금부터는 오직 **[현재 질문]에 대한 구체적인 디테일**만 원한다.\n\n"
         "--- [행동 수칙] ---\n"
         "1. **데이터 필터링 (Search Mode)**:\n"
         "   - [댓글 샘플] 전체를 스캔하되, 사용자의 질문(키워드/의도)과 **관련 없는 90%의 댓글은 과감히 버려라.**\n"
-        "   - 예: '배우 연기 어때?'라고 물으면, 스토리나 연출 관련 댓글은 절대 언급하지 마라.\n"
+        "   - 예: '배우 연기 어때?'라고 물으면, 스토리나 연출, 외모 관련 댓글은 절대 언급하지 마라.\n"
         "2. **근거 기반 답변**:\n"
         "   - 사용자의 질문에 부합하는 댓글을 찾았다면, 그 내용을 요약하고 **반드시 실제 댓글 문구를 인용**('...')하여 신뢰도를 높여라.\n"
         "3. **없으면 없다고 말하기**:\n"
         "   - 질문과 관련된 댓글이 샘플 내에 없다면, 말을 지어내지 말고 솔직하게 '관련된 구체적인 언급은 데이터에서 찾을 수 없습니다'라고 답하라.\n\n"
-        "--- [안전 및 검열 수칙 (매우 중요)] ---\n"  
-        " - 댓글 원문에 욕설, 비속어, 혐오 표현이 포함된 경우, **반드시 마스킹(**) 처리하거나 순화**해서 출력하라.\n"
-        " - 예시: '씨발' -> '**', '개쩐다' -> '정말 대단하다' 등.\n"
-        " - **절대** 금지된 단어를 그대로 출력하여 답변이 차단되게 하지 마라.\n\n"
         "--- [절대 금지] ---\n"
-        "- '전반적으로~', '다양한 의견이~' 식의 뭉뚱그리기 금지.\n"
+        "- '전반적으로 다양한 의견이 있습니다' 식의 뻔한 맺음말 금지.\n"
         "- 방금 전 답변이나 첫 번째 요약 내용을 앵무새처럼 반복 금지.\n"
         "- 질문과 무관한 TMI(Too Much Information) 남발 금지."
     )
