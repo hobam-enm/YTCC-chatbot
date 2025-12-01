@@ -139,7 +139,7 @@ def kst_to_rfc3339_utc(dt_kst: datetime) -> str:
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-GEMINI_MODEL      = "gemini-2.5-flash-lite"
+GEMINI_MODEL      = "gemini-2.5-flash"
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
@@ -604,36 +604,73 @@ LIGHT_PROMPT = (
 )
 
 
+# ==============================================================================
+# [수정] Gemini 호출 함수 (안전 필터 해제 + 에러 핸들링 강화)
+# ==============================================================================
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                          timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current():
         raise RuntimeError("Gemini API Key가 비어 있습니다.")
 
+    # 1. 안전 설정 가져오기 (댓글 분석을 위해 필터링 끄기)
+    from google.generativeai.types import HarmCategory, HarmBlockThreshold
+    
+    # 모든 카테고리에 대해 "차단 안 함(BLOCK_NONE)" 설정
+    safety_settings = {
+        HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+        HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
+    }
+
     for _ in range(len(rk.keys) or 1):
         try:
             genai.configure(api_key=rk.current())
             model = genai.GenerativeModel(
                 model_name,
-                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens}
+                generation_config={"temperature": 0.2, "max_output_tokens": max_tokens},
+                system_instruction=system_instruction
             )
+            
+            # 2. generate_content에 safety_settings 전달
             resp = model.generate_content(
-                [system_instruction, user_payload],
-                request_options={"timeout": timeout_s}
+                user_payload,
+                request_options={"timeout": timeout_s},
+                safety_settings=safety_settings 
             )
-            if out := getattr(resp, "text", None):
-                return out
+            
+            # 3. resp.text 접근 시 발생하는 ValueError 방어
+            try:
+                # 텍스트가 정상적으로 있는지 확인
+                if getattr(resp, "text", None):
+                    return resp.text
+            except ValueError:
+                # 텍스트가 없어서 에러가 난 경우 (필터링됨)
+                if resp.prompt_feedback:
+                    # 피드백 로그를 남기고 빈 문자열 반환 (앱 죽는 것 방지)
+                    print(f"⚠️ [Blocked] 사유: {resp.prompt_feedback}")
+                    # 만약 차단되었더라도 후보군(candidates)에 텍스트가 남아있는지 2차 확인
+                    pass 
+            
+            # 4. text 속성 접근 실패 시, candidate 구조를 직접 파고들어 텍스트 추출 시도
             if c0 := (getattr(resp, "candidates", None) or [None])[0]:
                 if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
                     if hasattr(p0, "text"):
                         return p0.text
-            return ""
+            
+            return "" # 아무것도 없으면 빈 문자열 반환
 
         except Exception as e:
-            if "429" in str(e).lower() and len(rk.keys) > 1:
-                rk.rotate()
-                continue
-            raise
+            # 429(Quota) 에러인 경우에만 키 교체 후 재시도
+            msg = str(e).lower()
+            if "429" in msg or "quota" in msg:
+                if len(rk.keys) > 1:
+                    rk.rotate()
+                    continue
+            # 그 외 에러는 로그 출력 후 상위로 전파하거나 빈값 반환
+            print(f"Gemini API Error: {e}")
+            raise e
 
     return ""
 
