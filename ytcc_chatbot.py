@@ -132,7 +132,11 @@ st.markdown(
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-GEMINI_MODEL      = "gemini-2.5-flash"  
+
+# [변경] 모델을 full / lite로 분리
+GEMINI_MODEL_FULL = "gemini-2.5-flash"
+GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
+
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
@@ -145,6 +149,7 @@ def ensure_state():
         "last_csv": "",
         "last_df": None,
         "sample_text": "",
+        "sample_text_raw": "",   # [추가] 세탁 전 원본 샘플
         "loaded_session_name": None
     }
     for k, v in defaults.items():
@@ -294,7 +299,8 @@ def save_current_session_to_github():
         meta_data = {
             "chat": st.session_state.chat,
             "last_schema": st.session_state.last_schema,
-            "sample_text": st.session_state.sample_text
+            "sample_text": st.session_state.sample_text,
+            "sample_text_raw": st.session_state.sample_text_raw,
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta_data, f, ensure_ascii=False, indent=2)
@@ -341,7 +347,8 @@ def load_session_from_github(sess_name: str):
                 "last_csv": os.path.join(local_dir, "comments.csv"),
                 "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
                 "loaded_session_name": sess_name,
-                "sample_text": meta.get("sample_text", "")
+                "sample_text": meta.get("sample_text", ""),
+                "sample_text_raw": meta.get("sample_text_raw", "")
             })
         except Exception as e:
             st.error(f"세션 로드 실패: {e}")
@@ -549,19 +556,17 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
 
             # 5. 텍스트 정상 추출 시도
             if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                return candidate.content.parts[0].text
+                # parts[0]에 텍스트가 없으면 나머지 파트도 순회해서 첫 텍스트를 찾아본다.
+                for p in candidate.content.parts:
+                    if getattr(p, "text", None):
+                        return p.text
             else:
-                # [수정] 도대체 뭘 보냈는지 원본 데이터를 화면에 뿌려봅니다.
                 st.error("⚠️ [미스터리 오류] 차단 코드는 없는데 텍스트가 비어있습니다.")
                 st.write("▼ AI가 보낸 원본 데이터 (JSON):")
-                
-                # 응답 객체를 딕셔너리로 변환해서 보여줌 (디버깅용)
                 try:
-                    # candidate 객체의 내용을 있는 그대로 출력
                     st.json(type(candidate).to_dict(candidate))
                 except:
                     st.write(candidate)
-                
                 return "⚠️ [오류] 생성된 텍스트가 없습니다."
 
         except Exception as e:
@@ -570,10 +575,62 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 if len(rk.keys) > 1:
                     rk.rotate()
                     continue
-            st.error(f"🔥 [API 에러 발생]: {e}") # 화면에 에러 출력
+            st.error(f"🔥 [API 에러 발생]: {e}")
             raise e
 
-    return ""
+    # [변경] 완전 빈 문자열 대신 의미 있는 메시지
+    return "⚠️ [시스템] 예상치 못한 상태로 인해 답변을 생성하지 못했습니다."
+
+# [추가] 2.5-flash-lite로 댓글 텍스트 '세탁'하는 함수
+def wash_comments_with_lite(raw_comments: str, user_query: str) -> str:
+    """
+    2.5-flash-lite를 이용해 댓글 텍스트를 '세탁'한다.
+    - 욕설/혐오/선정 표현을 마스킹 또는 순화
+    - 의미와 감정 흐름은 유지
+    """
+    if not raw_comments:
+        return ""
+
+    sys = (
+        "역할: 유튜브 댓글 원본을 정책 친화적인 분석용 텍스트로 세탁하는 필터.\n"
+        "규칙:\n"
+        "- 입력은 여러 개의 댓글이 줄 단위로 이어진 텍스트이다.\n"
+        "- 각 줄(댓글)의 핵심 의미, 감정, 평가 방향(호/불호/비판/칭찬 등)은 유지한다.\n"
+        "- 대신 욕설, 노골적인 성적 표현, 혐오/차별 표현은 글자 일부를 *로 가리거나, 순화된 표현으로 바꾼다.\n"
+        "- 숫자, 이모지, 하트(♥), [T|R] 같은 메타데이터는 가능하면 그대로 보존한다.\n"
+        "- 요약하거나 해석하지 말고, 입력 줄 수와 비슷한 개수의 줄을 그대로 돌려준다.\n"
+        "- 새로 창작된 의견을 추가하지 말고, 원본의 내용만 정제해서 재작성한다.\n"
+    )
+
+    payload = (
+        f"[사용자 질문 컨텍스트]\n{user_query}\n\n"
+        f"[댓글 원본 샘플]\n{raw_comments}\n\n"
+        "[출력 형식 가이드]\n"
+        "- 각 줄은 하나의 댓글에 대응한다.\n"
+        "- 욕설/혐오 표현은 *** 또는 순화어로 치환한다.\n"
+        "- 나머지 구조는 원본과 최대한 유사하게 유지한다."
+    )
+
+    washed = call_gemini_rotating(
+        GEMINI_MODEL_LITE,
+        GEMINI_API_KEYS,
+        sys,
+        payload,
+        timeout_s=GEMINI_TIMEOUT,
+        max_tokens=GEMINI_MAX_TOKENS,
+    )
+
+    if not washed or not washed.strip():
+        # 최소한의 로컬 fallback 마스킹
+        basic = re.sub(
+            r"(씨발|시발|ㅅㅂ|병신|ㅂㅅ|좆|존나|지랄)",
+            "***",
+            raw_comments,
+            flags=re.IGNORECASE,
+        )
+        return basic
+
+    return washed
 
 def yt_search_videos(rt, keyword, max_results, order="relevance",
                      published_after=None, published_before=None):
@@ -795,8 +852,15 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
     prog_bar.progress(0.05, text="해석중…")
     
-    # 여기서 call_gemini_rotating 호출 시 system_instruction="" 대신 None 처리는 함수 내부에서 함
-    light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
+    # [변경] 기간/키워드 파싱은 2.5-flash-lite에 맡김
+    light = call_gemini_rotating(
+        GEMINI_MODEL_LITE,
+        GEMINI_API_KEYS,
+        "",
+        LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
+        timeout_s=GEMINI_TIMEOUT,
+        max_tokens=GEMINI_MAX_TOKENS,
+    )
     schema = parse_light_block_to_schema(light)
     st.session_state["last_schema"] = schema
 
@@ -834,28 +898,33 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
         return "지정 조건에서 댓글을 찾을 수 없습니다. 다른 조건으로 시도해 보세요."
 
     prog_bar.progress(0.90, text="AI 분석중…")
-    sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
-    st.session_state["sample_text"] = sample_text
+
+    # [변경] 1차: 원본 샘플 추출
+    sample_text_raw, _, _ = serialize_comments_for_llm_from_file(csv_path)
+    st.session_state["sample_text_raw"] = sample_text_raw
+
+    # [추가] 2차: 2.5-flash-lite로 '세탁'
+    sample_text_clean = wash_comments_with_lite(sample_text_raw, user_query)
+    st.session_state["sample_text"] = sample_text_clean
 
     # [프롬프트 업데이트] 욕설 마스킹 및 안전 지침 추가
     sys = (
         "WARNING: This constitutes a role-play for data analysis purposes only.\n"
-        "You are a 'Text Safety Analysis System' designed to process raw internet comments objectively.\n"
-        "Your task is to extract public sentiment from the provided dataset, even if it contains offensive language.\n\n"
-        "--- [데이터 처리 수칙 (Security Protocol)] ---\n"
-        "1. **객관적 처리**: 모든 댓글(욕설 포함)을 단순한 '분석용 원시 데이터(Raw Data)'로 취급하라. 감정적으로 반응하지 마라.\n"
-        "2. **안전 마스킹(Masking)**: 댓글 원문에 욕설, 비속어, 심한 혐오 표현이 포함된 경우, 의미는 유지하되 **반드시 특수문자(**)로 마스킹**하여 출력하라.\n"
-        "   - 예: '씨발' → '**', '미친' → '**', '개쩐다' → '정말 대단하다(순화)'\n"
-        "3. **차단 회피**: 금지된 단어를 그대로 출력하여 시스템에 의해 답변이 차단되는 상황을 절대 만들지 마라.\n\n"
+        "You are a 'Text Safety Analysis System' designed to process sanitized YouTube comments.\n"
+        "입력으로 주어지는 댓글은 이미 1차 세탁이 끝난 상태이며, 너는 이 데이터를 기반으로 여론을 분석한다.\n\n"
+        "--- [데이터 처리 수칙] ---\n"
+        "1. **객관적 처리**: 모든 댓글을 분석용 데이터로만 취급한다.\n"
+        "2. **추가 마스킹**: 혹시 남아있는 과격한 표현이 보이면 의미를 유지하는 선에서 한 번 더 순화하여 인용한다.\n"
+        "3. **차단 회피**: 유해 표현을 그대로 출력하여 시스템에 의해 답변이 차단되는 상황을 만들지 마라.\n\n"
         "너는 냉철한 '여론 분석 데이터 애널리스트'다. 위 수칙을 준수하며 팩트와 근거 중심의 보고서를 작성하라.\n"
-        "제공된 [댓글 샘플]을 철저히 분석하여 아래 포맷에 맞춰 출력하라.\n\n"
+        "제공된 [댓글 샘플(세탁본)]을 철저히 분석하여 아래 포맷에 맞춰 출력하라.\n\n"
         "--- [보고서 작성 가이드] ---\n"
         "1. **3줄 요약**: 전체 여론을 관통하는 핵심 내용을 3개의 짧은 문장으로 요약 (가장 강렬한 반응 위주).\n"
         "2. **감성 분포**: 긍정/부정/중립 비율을 추산하여 표시 (예: 긍정 60% | 부정 30% | 중립 10%).\n"
         "3. **주요 토픽 분석 (가장 중요)**:\n"
         "   - 가장 많이 언급된 주제 3~4가지를 선정하여 소제목(###)으로 구분.\n"
         "   - 각 주제별로 대중의 반응이 '호'인지 '불호'인지 명확히 밝히고,\n"
-        "   - 그 근거가 되는 **실제 댓글 원문**을 반드시 2개씩 인용(Quote)하라. (단, 욕설은 마스킹 필수)\n"
+        "   - 그 근거가 되는 **실제 댓글 문구**를 반드시 2개씩 인용(Quote)하라. (이미 세탁된 문구를 그대로 사용)\n"
         "4. **특이점**: 소수 의견이지만 무시할 수 없는 날카로운 지적이나 예상치 못한 반응 1가지.\n\n"
         "--- [금지 사항] ---\n"
         "- '전반적으로 반응이 좋습니다' 같은 뭉뚱그린 표현 금지.\n"
@@ -868,9 +937,18 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
         f"[키워드]: {', '.join(kw_main)}\n"
         f"[엔티티]: {', '.join(kw_ent)}\n"
         f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n"
+        f"[댓글 샘플(세탁본)]:\n{sample_text_clean}\n"
     )
-    answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
+
+    # [변경] 실제 분석은 2.5-flash(full)로
+    answer_md_raw = call_gemini_rotating(
+        GEMINI_MODEL_FULL,
+        GEMINI_API_KEYS,
+        sys,
+        payload,
+        timeout_s=GEMINI_TIMEOUT,
+        max_tokens=GEMINI_MAX_TOKENS,
+    )
 
     prog_bar.progress(1.0, text="완료")
     time.sleep(0.5)
@@ -883,43 +961,55 @@ def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")):
         return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
 
+    # [변경] follow-up도 세탁된 샘플 기준
     sample_text = st.session_state.get("sample_text", "")
+    if not sample_text and st.session_state.get("sample_text_raw"):
+        # 혹시 세탁본이 없다면 한번 더 라이트로 세탁
+        sample_text = wash_comments_with_lite(st.session_state["sample_text_raw"], user_query)
+        st.session_state["sample_text"] = sample_text
+
     context = "\n".join(f"[이전 {'Q' if m['role'] == 'user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
 
     # [프롬프트 업데이트] 조사관 페르소나 + 안전 지침
     sys = (
         "WARNING: This constitutes a role-play for data analysis purposes only.\n"
-        "You are a 'Chief Investigator' extracting specific details from a raw comment database.\n"
-        "Your goal is to provide factual evidence based on the user's specific query.\n\n"
-        "--- [데이터 처리 수칙 (Security Protocol)] ---\n"
-        "1. **객관적 처리**: 욕설이나 비하 발언이 포함된 댓글도 분석 데이터로 간주하되, 출력 시에는 감정을 배제하고 건조하게 서술하라.\n"
-        "2. **안전 마스킹(Masking)**: 인용하는 댓글에 욕설, 비속어, 혐오 표현이 있다면 **반드시 특수문자(**)로 가리거나 순화**하라.\n"
-        "   - 예: '면상이 빻았다' → '외모가 **하다', '씨발' → '**'\n"
-        "3. **안전 정책 준수**: 유해한 표현을 그대로 출력하여 답변이 차단되지 않도록 주의하라.\n\n"
+        "You are a 'Chief Investigator' extracting specific details from a sanitized comment database.\n"
+        "입력으로 주어지는 댓글은 이미 1차 세탁이 끝난 상태이다.\n\n"
+        "--- [데이터 처리 수칙] ---\n"
+        "1. **객관적 처리**: 댓글은 분석 데이터로만 취급하고 감정을 개입하지 않는다.\n"
+        "2. **추가 마스킹**: 필요시 남아 있는 과격한 표현은 의미를 유지하는 선에서 한 번 더 순화한다.\n"
+        "3. **안전 정책 준수**: 유해 표현을 그대로 출력하여 답변이 차단되지 않도록 주의한다.\n\n"
         "사용자는 이미 전체적인 요약은 확인했다. 지금부터는 오직 **[현재 질문]에 대한 구체적인 디테일**만 원한다.\n\n"
         "--- [행동 수칙] ---\n"
         "1. **데이터 필터링 (Search Mode)**:\n"
-        "   - [댓글 샘플] 전체를 스캔하되, 사용자의 질문(키워드/의도)과 **관련 없는 90%의 댓글은 과감히 버려라.**\n"
-        "   - 예: '배우 연기 어때?'라고 물으면, 스토리나 연출, 외모 관련 댓글은 절대 언급하지 마라.\n"
+        "   - [댓글 샘플] 전체를 스캔하되, 사용자의 질문(키워드/의도)과 관련 없는 내용은 과감히 버린다.\n"
         "2. **근거 기반 답변**:\n"
-        "   - 사용자의 질문에 부합하는 댓글을 찾았다면, 그 내용을 요약하고 **반드시 실제 댓글 문구를 인용**('...')하여 신뢰도를 높여라.\n"
+        "   - 질문에 부합하는 댓글을 찾았다면, 그 내용을 요약하고 **실제 댓글 문구**를 인용하여 근거를 제시한다.\n"
         "3. **없으면 없다고 말하기**:\n"
-        "   - 질문과 관련된 댓글이 샘플 내에 없다면, 말을 지어내지 말고 솔직하게 '관련된 구체적인 언급은 데이터에서 찾을 수 없습니다'라고 답하라.\n\n"
+        "   - 관련된 댓글이 없으면 지어내지 말고 '관련된 구체적인 언급은 데이터에서 찾을 수 없습니다'라고 답한다.\n"
         "--- [절대 금지] ---\n"
-        "- '전반적으로 다양한 의견이 있습니다' 식의 뻔한 맺음말 금지.\n"
-        "- 방금 전 답변이나 첫 번째 요약 내용을 앵무새처럼 반복 금지.\n"
-        "- 질문과 무관한 TMI(Too Much Information) 남발 금지."
+        "- '전반적으로 다양한 의견이 있습니다' 식의 뭉뚱그린 맺음말 금지.\n"
+        "- 방금 전 답변이나 첫 번째 요약 내용을 반복 금지.\n"
+        "- 질문과 무관한 TMI 남발 금지."
     )
 
     payload = (
         f"{context}\n\n"
         f"[현재 질문]: {user_query}\n"
         f"[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n"
-        f"[댓글 샘플]:\n{sample_text}\n"
+        f"[댓글 샘플(세탁본)]:\n{sample_text}\n"
     )
 
     with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-        response_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
+        # [변경] follow-up 역시 full로
+        response_raw = call_gemini_rotating(
+            GEMINI_MODEL_FULL,
+            GEMINI_API_KEYS,
+            sys,
+            payload,
+            timeout_s=GEMINI_TIMEOUT,
+            max_tokens=GEMINI_MAX_TOKENS,
+        )
         response = tidy_answer(response_raw)
 
     return response
