@@ -132,11 +132,7 @@ st.markdown(
 _YT_FALLBACK, _GEM_FALLBACK = [], []
 YT_API_KEYS       = list(st.secrets.get("YT_API_KEYS", [])) or _YT_FALLBACK
 GEMINI_API_KEYS   = list(st.secrets.get("GEMINI_API_KEYS", [])) or _GEM_FALLBACK
-
-# [변경] 모델을 full / lite로 분리
-GEMINI_MODEL_FULL = "gemini-2.5-flash"
-GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
-
+GEMINI_MODEL      = "gemini-2.5-flash-lite"  
 GEMINI_TIMEOUT    = 120
 GEMINI_MAX_TOKENS = 2048
 MAX_TOTAL_COMMENTS   = 120_000
@@ -149,7 +145,6 @@ def ensure_state():
         "last_csv": "",
         "last_df": None,
         "sample_text": "",
-        "sample_text_raw": "",   # [추가] 세탁 전 원본 샘플
         "loaded_session_name": None
     }
     for k, v in defaults.items():
@@ -299,8 +294,7 @@ def save_current_session_to_github():
         meta_data = {
             "chat": st.session_state.chat,
             "last_schema": st.session_state.last_schema,
-            "sample_text": st.session_state.sample_text,
-            "sample_text_raw": st.session_state.sample_text_raw,
+            "sample_text": st.session_state.sample_text
         }
         with open(meta_path, "w", encoding="utf-8") as f:
             json.dump(meta_data, f, ensure_ascii=False, indent=2)
@@ -347,8 +341,7 @@ def load_session_from_github(sess_name: str):
                 "last_csv": os.path.join(local_dir, "comments.csv"),
                 "last_df": pd.read_csv(os.path.join(local_dir, "videos.csv")) if videos_ok and os.path.exists(os.path.join(local_dir, "videos.csv")) else pd.DataFrame(),
                 "loaded_session_name": sess_name,
-                "sample_text": meta.get("sample_text", ""),
-                "sample_text_raw": meta.get("sample_text_raw", "")
+                "sample_text": meta.get("sample_text", "")
             })
         except Exception as e:
             st.error(f"세션 로드 실패: {e}")
@@ -419,34 +412,32 @@ def serialize_comments_for_llm_from_file(csv_path: str,
     return "\n".join(lines), len(lines), total_chars
 
 def tidy_answer(md: str) -> str:
+    """
+    AI 답변 상단에 불필요하게 붙는 '유튜브 댓글 분석 결과' 같은 제목만 제거하고,
+    나머지 마크다운 헤더(###)는 살려둡니다. (마크다운 파괴 방지)
+    """
     if not md:
         return ""
     
-    original = md  # ← 원본 백업
-
     lines = md.splitlines()
     cleaned = []
     
+    # "유튜브 댓글 분석" 같은 뻔한 제목만 지우기 위한 정규식
     REMOVE_PATTERN = re.compile(r"유튜브\s*댓글\s*분석|보고서\s*작성|분석\s*결과", re.IGNORECASE)
 
     for line in lines:
         if not line.strip():
             cleaned.append(line)
             continue
-
+            
+        # 1. 뻔한 제목이 포함된 줄이면 스킵 (내용이 긴 문장은 제외)
         if REMOVE_PATTERN.search(line) and len(line) < 50:
             continue
-
+            
+        # 2. 그 외의 정상적인 내용(소제목 포함)은 보존
         cleaned.append(line)
 
-    result = "\n".join(cleaned).strip()
-
-    # 🔴 만약 청소 후에 싹 비었다면, 차라리 원본이라도 돌려준다
-    if not result:
-        return original.strip()
-
-    return result
-
+    return "\n".join(cleaned).strip()
 
 YTB_ID_RE = re.compile(r"[A-Za-z0-9_-]{11}")
 
@@ -478,17 +469,18 @@ def strip_urls(s: str) -> str:
 
 # region [API Integrations: Gemini & YouTube]
 # ==============================================================================
-# [UI 디버깅용] Gemini 호출 함수 (화면에 차단 사유 직접 출력)
+# [Gemini 호출 함수] - 안전 필터 해제, 에러 핸들링, 디버깅 로그 강화
 # ==============================================================================
 def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
-                         timeout_s=120, max_tokens=5096) -> str:
+                         timeout_s=120, max_tokens=2048) -> str:
     rk = RotatingKeys(keys, "gem_key_idx")
     if not rk.current():
         raise RuntimeError("Gemini API Key가 비어 있습니다.")
 
+    # [핵심] system_instruction이 빈 문자열("")이면 None으로 변환 (라이브러리 에러 방지)
     real_sys_inst = None if (not system_instruction or not system_instruction.strip()) else system_instruction
 
-    # 안전 설정
+    # [핵심] 안전 설정 해제 (BLOCK_NONE) - 댓글 분석 시 과도한 차단 방지
     from google.generativeai.types import HarmCategory, HarmBlockThreshold
     safety_settings = {
         HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
@@ -506,70 +498,47 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 system_instruction=real_sys_inst 
             )
             
-            # API 호출
             resp = model.generate_content(
                 user_payload,
                 request_options={"timeout": timeout_s},
                 safety_settings=safety_settings 
             )
             
-            # -----------------------------------------------------------
-            # 🕵️‍♂️ [UI 디버깅] 화면에 바로 진단서 출력
-            # -----------------------------------------------------------
-            
-            # 1. 입력 자체가 차단된 경우 (Prompt Feedback)
+            # --- 디버깅 로그 (답변 없을 때 원인 파악용) ---
+            if not resp:
+                print("❌ [DEBUG] 응답 객체(resp)가 비어있습니다.")
+                return "⚠️ AI 응답 없음"
+
             if resp.prompt_feedback:
                 if resp.prompt_feedback.block_reason:
-                    reason = resp.prompt_feedback.block_reason
-                    st.error(f"🛑 [입력 차단] 질문(댓글 데이터) 자체가 막혔습니다!\n사유: {reason}")
-                    return "⚠️ [시스템] 질문 내용이 너무 위험하여 전송되지 않았습니다."
+                    print(f"🛑 [DEBUG] 입력 차단(Prompt Blocked): {resp.prompt_feedback.block_reason}")
 
-            # 2. 결과 후보군이 없는 경우
             if not resp.candidates:
-                st.error("❌ [오류] 생성된 답변 후보가 0개입니다. (강제 차단됨)")
-                return "⚠️ [시스템] 답변 생성 실패"
-
-            candidate = resp.candidates[0]
-            finish_reason = candidate.finish_reason
-            
-            # 3. 안전 차단 (SAFETY) 발생 시 -> 상세 리포트 출력
-            if finish_reason == 3: # 3 = SAFETY
-                st.error("🚨 [치명적 차단] 안전 필터(Safety Filter)가 답변을 삭제했습니다.")
-                
-                # 안전 등급 표 만들기
-                safety_data = []
-                for rating in candidate.safety_ratings:
-                    safety_data.append({
-                        "카테고리 (Category)": rating.category.name.replace("HARM_CATEGORY_", ""),
-                        "위험도 (Probability)": rating.probability.name,
-                        "차단여부": "🔴 차단원인" if rating.probability.name in ["HIGH", "MEDIUM"] else "🟢 통과"
-                    })
-                
-                # 화면에 표로 보여줌
-                st.dataframe(pd.DataFrame(safety_data), use_container_width=True)
-                
-                return "⚠️ [차단됨] 안전 정책(욕설/선정성/혐오)에 의해 답변이 삭제되었습니다. (위의 붉은 로그를 확인하세요)"
-
-            # 4. 그 외 비정상 종료
-            if finish_reason != 1: # 1 = STOP (정상)
-                st.warning(f"⚠️ [비정상 종료] 답변이 완료되지 않았습니다. (사유 코드: {finish_reason})")
-                if finish_reason == 2:
-                    st.caption("-> 원인: Max Token 초과 (답변이 너무 길어서 잘림)")
-
-            # 5. 텍스트 정상 추출 시도
-            if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                # parts[0]에 텍스트가 없으면 나머지 파트도 순회해서 첫 텍스트를 찾아본다.
-                for p in candidate.content.parts:
-                    if getattr(p, "text", None):
-                        return p.text
+                 print("❌ [DEBUG] 생성된 후보군(Candidates)이 0개입니다.")
             else:
-                st.error("⚠️ [미스터리 오류] 차단 코드는 없는데 텍스트가 비어있습니다.")
-                st.write("▼ AI가 보낸 원본 데이터 (JSON):")
-                try:
-                    st.json(type(candidate).to_dict(candidate))
-                except:
-                    st.write(candidate)
-                return "⚠️ [오류] 생성된 텍스트가 없습니다."
+                finish_reason = resp.candidates[0].finish_reason
+                # 1=STOP(정상), 2=MAX_TOKENS, 3=SAFETY(안전차단), 4=RECITATION
+                if finish_reason != 1: 
+                    print(f"⚠️ [DEBUG] 비정상 종료 발생! 사유 코드: {finish_reason}")
+
+            # 텍스트 추출 시도 (에러 방어)
+            try:
+                if getattr(resp, "text", None):
+                    return resp.text
+            except ValueError:
+                # 텍스트 생성 거부된 경우
+                if resp.prompt_feedback:
+                    blocked_msg = f"⚠️ [AI 답변 차단] 안전 필터 사유: {resp.prompt_feedback}"
+                    print(blocked_msg) 
+                    return blocked_msg 
+            
+            # 후보군(candidate) 직접 파싱 시도
+            if c0 := (getattr(resp, "candidates", None) or [None])[0]:
+                if p0 := (getattr(c0, "content", None) and getattr(c0.content, "parts", None) or [None])[0]:
+                    if hasattr(p0, "text"):
+                        return p0.text
+            
+            return "⚠️ [시스템] AI 답변을 생성하지 못했습니다. (내용 과다 또는 안전 정책 차단)"
 
         except Exception as e:
             msg = str(e).lower()
@@ -577,62 +546,10 @@ def call_gemini_rotating(model_name, keys, system_instruction, user_payload,
                 if len(rk.keys) > 1:
                     rk.rotate()
                     continue
-            st.error(f"🔥 [API 에러 발생]: {e}")
+            print(f"Gemini API Error: {e}")
             raise e
 
-    # [변경] 완전 빈 문자열 대신 의미 있는 메시지
-    return "⚠️ [시스템] 예상치 못한 상태로 인해 답변을 생성하지 못했습니다."
-
-# [추가] 2.5-flash-lite로 댓글 텍스트 '세탁'하는 함수
-def wash_comments_with_lite(raw_comments: str, user_query: str) -> str:
-    """
-    2.5-flash-lite를 이용해 댓글 텍스트를 '세탁'한다.
-    - 욕설/혐오/선정 표현을 마스킹 또는 순화
-    - 의미와 감정 흐름은 유지
-    """
-    if not raw_comments:
-        return ""
-
-    sys = (
-        "역할: 유튜브 댓글 원본을 정책 친화적인 분석용 텍스트로 세탁하는 필터.\n"
-        "규칙:\n"
-        "- 입력은 여러 개의 댓글이 줄 단위로 이어진 텍스트이다.\n"
-        "- 각 줄(댓글)의 핵심 의미, 감정, 평가 방향(호/불호/비판/칭찬 등)은 유지한다.\n"
-        "- 대신 욕설, 노골적인 성적 표현, 혐오/차별 표현은 글자 일부를 *로 가리거나, 순화된 표현으로 바꾼다.\n"
-        "- 숫자, 이모지, 하트(♥), [T|R] 같은 메타데이터는 가능하면 그대로 보존한다.\n"
-        "- 요약하거나 해석하지 말고, 입력 줄 수와 비슷한 개수의 줄을 그대로 돌려준다.\n"
-        "- 새로 창작된 의견을 추가하지 말고, 원본의 내용만 정제해서 재작성한다.\n"
-    )
-
-    payload = (
-        f"[사용자 질문 컨텍스트]\n{user_query}\n\n"
-        f"[댓글 원본 샘플]\n{raw_comments}\n\n"
-        "[출력 형식 가이드]\n"
-        "- 각 줄은 하나의 댓글에 대응한다.\n"
-        "- 욕설/혐오 표현은 *** 또는 순화어로 치환한다.\n"
-        "- 나머지 구조는 원본과 최대한 유사하게 유지한다."
-    )
-
-    washed = call_gemini_rotating(
-        GEMINI_MODEL_LITE,
-        GEMINI_API_KEYS,
-        sys,
-        payload,
-        timeout_s=GEMINI_TIMEOUT,
-        max_tokens=GEMINI_MAX_TOKENS,
-    )
-
-    if not washed or not washed.strip():
-        # 최소한의 로컬 fallback 마스킹
-        basic = re.sub(
-            r"(씨발|시발|ㅅㅂ|병신|ㅂㅅ|좆|존나|지랄)",
-            "***",
-            raw_comments,
-            flags=re.IGNORECASE,
-        )
-        return basic
-
-    return washed
+    return ""
 
 def yt_search_videos(rt, keyword, max_results, order="relevance",
                      published_after=None, published_before=None):
@@ -854,15 +771,8 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
     if not GEMINI_API_KEYS: return "오류: Gemini API Key가 설정되지 않았습니다."
     prog_bar.progress(0.05, text="해석중…")
     
-    # [변경] 기간/키워드 파싱은 2.5-flash-lite에 맡김
-    light = call_gemini_rotating(
-        GEMINI_MODEL_LITE,
-        GEMINI_API_KEYS,
-        "",
-        LIGHT_PROMPT.replace("{USER_QUERY}", user_query),
-        timeout_s=GEMINI_TIMEOUT,
-        max_tokens=GEMINI_MAX_TOKENS,
-    )
+    # 여기서 call_gemini_rotating 호출 시 system_instruction="" 대신 None 처리는 함수 내부에서 함
+    light = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, "", LIGHT_PROMPT.replace("{USER_QUERY}", user_query))
     schema = parse_light_block_to_schema(light)
     st.session_state["last_schema"] = schema
 
@@ -900,37 +810,28 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
         return "지정 조건에서 댓글을 찾을 수 없습니다. 다른 조건으로 시도해 보세요."
 
     prog_bar.progress(0.90, text="AI 분석중…")
-
-    # [변경] 1차: 원본 샘플 추출
-    sample_text_raw, _, _ = serialize_comments_for_llm_from_file(csv_path)
-    st.session_state["sample_text_raw"] = sample_text_raw
-
-    # [추가] 2차: 2.5-flash-lite로 '세탁'
-    sample_text_clean = wash_comments_with_lite(sample_text_raw, user_query)
-    st.session_state["sample_text"] = sample_text_clean
+    sample_text, _, _ = serialize_comments_for_llm_from_file(csv_path)
+    st.session_state["sample_text"] = sample_text
 
     # [프롬프트 업데이트] 욕설 마스킹 및 안전 지침 추가
     sys = (
-        "WARNING: This constitutes a role-play for data analysis purposes only.\n"
-        "You are a 'Text Safety Analysis System' designed to process sanitized YouTube comments.\n"
-        "입력으로 주어지는 댓글은 이미 1차 세탁이 끝난 상태이며, 너는 이 데이터를 기반으로 여론을 분석한다.\n\n"
-        "--- [데이터 처리 수칙] ---\n"
-        "1. **객관적 처리**: 모든 댓글을 분석용 데이터로만 취급한다.\n"
-        "2. **추가 마스킹**: 혹시 남아있는 과격한 표현이 보이면 의미를 유지하는 선에서 한 번 더 순화하여 인용한다.\n"
-        "3. **차단 회피**: 유해 표현을 그대로 출력하여 시스템에 의해 답변이 차단되는 상황을 만들지 마라.\n\n"
-        "너는 냉철한 '여론 분석 데이터 애널리스트'다. 위 수칙을 준수하며 팩트와 근거 중심의 보고서를 작성하라.\n"
-        "제공된 [댓글 샘플(세탁본)]을 철저히 분석하여 아래 포맷에 맞춰 출력하라.\n\n"
+        "너는 냉철한 '여론 분석 데이터 애널리스트'다. 감성적인 공감보다는 팩트와 근거 중심의 보고서를 작성하라.\n"
+        "제공된 [댓글 샘플]을 철저히 분석하여 아래 포맷에 맞춰 출력하라.\n\n"
         "--- [보고서 작성 가이드] ---\n"
         "1. **3줄 요약**: 전체 여론을 관통하는 핵심 내용을 3개의 짧은 문장으로 요약 (가장 강렬한 반응 위주).\n"
         "2. **감성 분포**: 긍정/부정/중립 비율을 추산하여 표시 (예: 긍정 60% | 부정 30% | 중립 10%).\n"
         "3. **주요 토픽 분석 (가장 중요)**:\n"
         "   - 가장 많이 언급된 주제 3~4가지를 선정하여 소제목(###)으로 구분.\n"
         "   - 각 주제별로 대중의 반응이 '호'인지 '불호'인지 명확히 밝히고,\n"
-        "   - 그 근거가 되는 **실제 댓글 문구**를 반드시 2개씩 인용(Quote)하라. (이미 세탁된 문구를 그대로 사용)\n"
+        "   - 그 근거가 되는 **실제 댓글 원문**을 반드시 2개씩 인용(Quote)하라.\n"
         "4. **특이점**: 소수 의견이지만 무시할 수 없는 날카로운 지적이나 예상치 못한 반응 1가지.\n\n"
+        "--- [안전 및 검열 수칙 (매우 중요)] ---\n"  
+        " - 댓글 원문에 욕설, 비속어, 혐오 표현이 포함된 경우, **반드시 마스킹(**) 처리하거나 순화**해서 출력하라.\n"
+        " - 예시: '씨발' -> '**', '개쩐다' -> '정말 대단하다' 등.\n"
+        " - **절대** 금지된 단어를 그대로 출력하여 답변이 차단되게 하지 마라.\n\n"
         "--- [금지 사항] ---\n"
-        "- '전반적으로 반응이 좋습니다' 같은 뭉뚱그린 표현 금지.\n"
-        "- 인용한 댓글 외에 존재하지 않는 가짜 내용을 지어내지 말 것.\n"
+        "- '전반적으로 반응이 좋습니다' 같은 뻔한 말 금지.\n"
+        "- 인용한 댓글 외에 가짜 내용을 지어내지 말 것.\n"
         "- 중언부언하지 말고 개조식으로 명료하게 작성."
     )
 
@@ -939,18 +840,9 @@ def run_pipeline_first_turn(user_query: str, extra_video_ids=None, only_these_vi
         f"[키워드]: {', '.join(kw_main)}\n"
         f"[엔티티]: {', '.join(kw_ent)}\n"
         f"[기간(KST)]: {schema['start_iso']} ~ {schema['end_iso']}\n\n"
-        f"[댓글 샘플(세탁본)]:\n{sample_text_clean}\n"
+        f"[댓글 샘플]:\n{sample_text}\n"
     )
-
-    # [변경] 실제 분석은 2.5-flash(full)로
-    answer_md_raw = call_gemini_rotating(
-        GEMINI_MODEL_FULL,
-        GEMINI_API_KEYS,
-        sys,
-        payload,
-        timeout_s=GEMINI_TIMEOUT,
-        max_tokens=GEMINI_MAX_TOKENS,
-    )
+    answer_md_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
 
     prog_bar.progress(1.0, text="완료")
     time.sleep(0.5)
@@ -963,55 +855,40 @@ def run_followup_turn(user_query: str):
     if not (schema := st.session_state.get("last_schema")):
         return "오류: 이전 분석 기록이 없습니다. 새 채팅을 시작해주세요."
 
-    # [변경] follow-up도 세탁된 샘플 기준
     sample_text = st.session_state.get("sample_text", "")
-    if not sample_text and st.session_state.get("sample_text_raw"):
-        # 혹시 세탁본이 없다면 한번 더 라이트로 세탁
-        sample_text = wash_comments_with_lite(st.session_state["sample_text_raw"], user_query)
-        st.session_state["sample_text"] = sample_text
-
     context = "\n".join(f"[이전 {'Q' if m['role'] == 'user' else 'A'}]: {m['content']}" for m in st.session_state["chat"][-10:])
 
     # [프롬프트 업데이트] 조사관 페르소나 + 안전 지침
     sys = (
-        "WARNING: This constitutes a role-play for data analysis purposes only.\n"
-        "You are a 'Chief Investigator' extracting specific details from a sanitized comment database.\n"
-        "입력으로 주어지는 댓글은 이미 1차 세탁이 끝난 상태이다.\n\n"
-        "--- [데이터 처리 수칙] ---\n"
-        "1. **객관적 처리**: 댓글은 분석 데이터로만 취급하고 감정을 개입하지 않는다.\n"
-        "2. **추가 마스킹**: 필요시 남아 있는 과격한 표현은 의미를 유지하는 선에서 한 번 더 순화한다.\n"
-        "3. **안전 정책 준수**: 유해 표현을 그대로 출력하여 답변이 차단되지 않도록 주의한다.\n\n"
+        "너는 수천 개의 댓글 데이터베이스에서 특정 정보를 발굴하는 '수석 조사관'이다.\n"
         "사용자는 이미 전체적인 요약은 확인했다. 지금부터는 오직 **[현재 질문]에 대한 구체적인 디테일**만 원한다.\n\n"
         "--- [행동 수칙] ---\n"
         "1. **데이터 필터링 (Search Mode)**:\n"
-        "   - [댓글 샘플] 전체를 스캔하되, 사용자의 질문(키워드/의도)과 관련 없는 내용은 과감히 버린다.\n"
+        "   - [댓글 샘플] 전체를 스캔하되, 사용자의 질문(키워드/의도)과 **관련 없는 90%의 댓글은 과감히 버려라.**\n"
+        "   - 예: '배우 연기 어때?'라고 물으면, 스토리나 연출 관련 댓글은 절대 언급하지 마라.\n"
         "2. **근거 기반 답변**:\n"
-        "   - 질문에 부합하는 댓글을 찾았다면, 그 내용을 요약하고 **실제 댓글 문구**를 인용하여 근거를 제시한다.\n"
+        "   - 사용자의 질문에 부합하는 댓글을 찾았다면, 그 내용을 요약하고 **반드시 실제 댓글 문구를 인용**('...')하여 신뢰도를 높여라.\n"
         "3. **없으면 없다고 말하기**:\n"
-        "   - 관련된 댓글이 없으면 지어내지 말고 '관련된 구체적인 언급은 데이터에서 찾을 수 없습니다'라고 답한다.\n"
+        "   - 질문과 관련된 댓글이 샘플 내에 없다면, 말을 지어내지 말고 솔직하게 '관련된 구체적인 언급은 데이터에서 찾을 수 없습니다'라고 답하라.\n\n"
+        "--- [안전 및 검열 수칙 (매우 중요)] ---\n"  
+        " - 댓글 원문에 욕설, 비속어, 혐오 표현이 포함된 경우, **반드시 마스킹(**) 처리하거나 순화**해서 출력하라.\n"
+        " - 예시: '씨발' -> '**', '개쩐다' -> '정말 대단하다' 등.\n"
+        " - **절대** 금지된 단어를 그대로 출력하여 답변이 차단되게 하지 마라.\n\n"
         "--- [절대 금지] ---\n"
-        "- '전반적으로 다양한 의견이 있습니다' 식의 뭉뚱그린 맺음말 금지.\n"
-        "- 방금 전 답변이나 첫 번째 요약 내용을 반복 금지.\n"
-        "- 질문과 무관한 TMI 남발 금지."
+        "- '전반적으로~', '다양한 의견이~' 식의 뭉뚱그리기 금지.\n"
+        "- 방금 전 답변이나 첫 번째 요약 내용을 앵무새처럼 반복 금지.\n"
+        "- 질문과 무관한 TMI(Too Much Information) 남발 금지."
     )
 
     payload = (
         f"{context}\n\n"
         f"[현재 질문]: {user_query}\n"
         f"[기간(KST)]: {schema.get('start_iso', '?')} ~ {schema.get('end_iso', '?')}\n\n"
-        f"[댓글 샘플(세탁본)]:\n{sample_text}\n"
+        f"[댓글 샘플]:\n{sample_text}\n"
     )
 
     with st.spinner("💬 AI가 답변을 구성 중입니다..."):
-        # [변경] follow-up 역시 full로
-        response_raw = call_gemini_rotating(
-            GEMINI_MODEL_FULL,
-            GEMINI_API_KEYS,
-            sys,
-            payload,
-            timeout_s=GEMINI_TIMEOUT,
-            max_tokens=GEMINI_MAX_TOKENS,
-        )
+        response_raw = call_gemini_rotating(GEMINI_MODEL, GEMINI_API_KEYS, sys, payload)
         response = tidy_answer(response_raw)
 
     return response
